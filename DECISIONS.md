@@ -40,3 +40,14 @@ This document tracks edge cases, policy ambiguities, and data inconsistencies di
   1. Map the 37 informal descriptions to their canonical `ITM-xxxx` codes via a resilient normalization and keyword matching layer.
   2. For the 2 novel items, set `resolved_item_code = "NEW"`, route them to `NEW_ITEM_SOURCING` valued at `quantity * estimated_unit_price`, do not club them, and do not provide supplier suggestions.
 - **Why:** This directly follows Clause 1.1 and 1.2, matching the exact outcomes demonstrated in Worked Example 7 and Worked Example 13.
+
+---
+
+### Decision 6: Normalisation choices and non-dropping data quality logging
+- **What I noticed:** CSV feeds contain small data anomalies: casing differences, blank item codes, an invalid plant code (`PUN2`), a zero-quantity line, and blocked suppliers holding active rate contracts.
+- **What I decided:**
+  1. Standardize all textual inputs on ingestion: strip whitespace, uppercase plant codes (`PUN1`, `CHK1`) and UoMs (`NOS`, `KG`, `LTR`).
+  2. Parse all monetary amounts, ratings, and quantities strictly into `Decimal` (never floating-point numbers) to avoid precision drift.
+  3. **No silent drops:** Every row from `sample_pr_batch.csv` is preserved in `pr_lines`. Rows with data defects (e.g. `PUN2`, zero quantity, blank item codes) are logged into a queryable `data_quality_issues` table with structured metadata (`file_source`, `row_identifier`, `issue_type`, `severity`, `raw_data`).
+  4. **Resilient foreign key validation:** Ingestion loaders verify foreign key integrity (e.g. `po_history -> suppliers/items`, `contract_lines -> contracts/items`) and record orphan references into `data_quality_issues` rather than failing the transaction or crashing the seed process.
+- **Why:** Production procurement systems must never discard requisitions without an audit trail. Storing the raw lines while raising actionable data quality alerts ensures full traceability and allows buyers to inspect flagged items in their workspace.
