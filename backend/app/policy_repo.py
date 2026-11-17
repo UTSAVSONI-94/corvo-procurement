@@ -50,6 +50,12 @@ class PolicyRepository:
         data = json.loads(record.rules_json)
         return PolicyDocument(**data)
 
+    def get_policy(self, as_of_date: Union[date, datetime, str]) -> PolicyDocument:
+        return self.get_active_policy(as_of_date)
+
+    def __call__(self, as_of_date: Union[date, datetime, str]) -> PolicyDocument:
+        return self.get_active_policy(as_of_date)
+
     def get_by_version(self, version_label: str) -> Optional[PolicyDocument]:
         record = self.db.query(PolicyVersion).filter_by(version_label=version_label).first()
         if not record:

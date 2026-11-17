@@ -376,3 +376,4 @@ def test_full_batch_summary_metrics(batch_results, reference_data):
     print(f"Total Requirements Consolidated Into POs : {len(unique_pos)} POs")
     print(f"Blocked / Inactive Suppliers Awarded PO  : {len(blocked_awarded)}")
     print("=" * 50 + "\n")
+

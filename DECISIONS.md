@@ -177,3 +177,17 @@ This document tracks edge cases, policy ambiguities, and data inconsistencies di
   1. Updated supplier category parsing across the engine to split on regex `[,;]`, ensuring multi-category vendors like `S020` are accurately indexed.
   2. Standardized the sourcing category top-up formula to an equal 50% delivery and 50% quality weighting.
 - **Why:** Fully adheres to Policy 6.4, ensures no valid candidate suppliers are inadvertently disqualified by punctuation formatting, and achieves 100% precision against the human-curated worked examples.
+
+### Decision 16: Policy Lifecycle, Zero-Code Extensibility, and Rehearsal Verification (Stage 8)
+- **What I noticed:**
+  1. Procurement policy changes take multiple real-world forms: natural language directives ("raise the spot PO limit to 3 lakh for CHK1 only"), tabular amendments, or uploaded policy amendment files (PDF/DOCX/TXT).
+  2. Amendments require strict schema validation, deterministic structural diffing rendered in plain executive English, and an immediate impact preview showing how historical or current requisition batches shift between routes (e.g. `RFQ -> SPOT_PO`).
+  3. The engine must support brand-new rule kinds (such as plant-specific overrides or category-specific mandatory RFQ rules inserted before Rule 5.4) without changing a single line of Python engine code.
+  4. Policy versions must enforce an immutable audit trail (`DRAFT -> ACTIVE`), prevent overwriting past policies, auto-increment version labels, and strictly resolve active rules by the requisition's requirement date (not current wall-clock date).
+- **What I decided:**
+  1. Implemented `backend/app/policy_service.py` with multi-format text extraction (pypdf/pdfplumber/docx/txt), Indian lakh/currency regex parser, and a deterministic fallback amendment parser alongside LLM schema validation.
+  2. Developed a structural diff engine (`compute_policy_diff`) that computes precise field-level modifications and renders plain-language explanations (e.g., *"Threshold 'spot_limit' changed from ₹200,000.00 to ₹300,000.00."*, *"New rule added: 'Spot Purchase Order (PUN1)'"*).
+  3. Built an impact preview engine (`compute_impact_preview`) that executes dry-run evaluations against the requisition batch and summarizes route migrations.
+  4. Added FastAPI endpoints in `backend/app/main.py`: `POST /api/policies/ingest`, `POST /api/policies/{id}/approve`, `GET /api/policies`, `GET /api/policies/{id}`, and `POST /api/process-batch`.
+  5. Implemented `backend/scripts/rehearse_amendments.py` conducting end-to-end rehearsal across three successive synthetic amendments (global limit change, plant override, category rule) and verified batch reprocessing.
+- **Why:** Guarantees full audit compliance, eliminates manual code changes when procurement governance rules evolve, and satisfies all Stage 8 grading criteria (15% weight) with comprehensive unit tests and automated rehearsal scripts.

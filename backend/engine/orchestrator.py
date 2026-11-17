@@ -198,8 +198,10 @@ def process_batch(
 
     for req in requirements:
         # Retrieve policy active as of the requirement date
-        if hasattr(policy_repo, "get_policy"):
-            policy: PolicyDocument = policy_repo.get_policy(req.requirement_date)
+        if hasattr(policy_repo, "get_active_policy"):
+            policy: PolicyDocument = policy_repo.get_active_policy(req.requirement_date)
+        elif hasattr(policy_repo, "get_policy"):
+            policy = policy_repo.get_policy(req.requirement_date)
         elif callable(policy_repo):
             policy = policy_repo(req.requirement_date)
         else:
