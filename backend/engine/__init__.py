@@ -12,6 +12,8 @@ from .types import (
     DecisionOutput,
     RankedSupplier,
     ScoreBreakdown,
+    ReferenceData,
+    BatchLineResult,
 )
 from .item_matcher import match_item, normalize_text
 from .clubber import club_pr_lines
@@ -31,6 +33,7 @@ from .preferred_suppliers import (
     export_preferred_suppliers_csv,
     calculate_supplier_score,
 )
+from .orchestrator import process_batch
 from .policy_eval import evaluate_condition, evaluate_policy_rules, resolve_ref
 from .schema import (
     PolicyDocument,
@@ -55,6 +58,8 @@ __all__ = [
     "DecisionOutput",
     "RankedSupplier",
     "ScoreBreakdown",
+    "ReferenceData",
+    "BatchLineResult",
     "match_item",
     "normalize_text",
     "club_pr_lines",
@@ -68,6 +73,7 @@ __all__ = [
     "suggest_sourcing_suppliers",
     "export_preferred_suppliers_csv",
     "calculate_supplier_score",
+    "process_batch",
     "evaluate_condition",
     "evaluate_policy_rules",
     "resolve_ref",

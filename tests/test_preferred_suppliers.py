@@ -289,3 +289,4 @@ def test_export_preferred_suppliers_csv(mock_suppliers):
     assert rows[0]["supplier_id"] == "S029"
     assert rows[0]["reference_price"] == "94.00"
     assert "total_score" in rows[0]
+

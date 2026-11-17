@@ -143,3 +143,29 @@ class DecisionOutput:
     clause: str = ""
     reason: str = ""
 
+
+@dataclass
+class ReferenceData:
+    items: Dict[str, ItemMasterRecord]
+    suppliers: Dict[str, SupplierRecord]
+    contracts: List[ContractRecord]
+    po_history: List[POHistoryRecord]
+
+
+@dataclass
+class BatchLineResult:
+    pr_no: str
+    pr_line: int
+    resolved_item_code: str
+    group_id: str
+    po_id: Optional[str]
+    decision: str
+    route: str
+    supplier_id: Optional[str]
+    unit_price: Optional[Decimal]
+    group_value_inr: Decimal
+    suggested_supplier_ids: str  # ";"-separated e.g. "S043;S044;S042" or ""
+    policy_version: str
+    reason: str
+
+

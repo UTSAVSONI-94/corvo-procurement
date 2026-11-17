@@ -139,3 +139,28 @@ This document tracks edge cases, policy ambiguities, and data inconsistencies di
   6. **Explainability & Breakdown:**
      - The engine outputs a granular `ScoreBreakdown` per supplier with `{component, raw_value, weight, points}` to power the UI's "Why ranked here" explanation.
 - **Why:** Transparent linear scoring ensures fairness, auditability, and 100% adherence to procurement compliance standards while accurately reproducing historical buyer choices.
+
+---
+
+### Decision 14: Batch Processing Orchestration, Non-Processable Line Handling, and PO Consolidation
+- **What I noticed:**
+  1. The procurement feed contains lines with data anomalies (e.g. invalid plant `PUN2` in `PR-26-00173/1`, zero quantity in `PR-26-00172/1`, or potential duplicate PR line occurrences).
+  2. The task brief requires returning exactly one output row per input PR line while marking unprocessable rows with route `NOT_PROCESSED` without crashing the pipeline.
+  3. Policy Section 7 specifies PO consolidation across PO-ending requirements (same supplier, same plant, same route, within 24 hours of that PO's first requirement) while strictly isolating sourcing requests.
+  4. Sourcing and PO awarding must enforce a hard guard ensuring Blocked or Inactive suppliers never receive a PO.
+- **What I decided:**
+  1. **Line-Level Rejection Rules (`route = "NOT_PROCESSED"`):**
+     - **Duplicate PR Lines:** Evaluated on `(pr_no, pr_line)`. The first occurrence proceeds through processing; subsequent duplicates are marked `NOT_PROCESSED` with reason: `"Duplicate PR line: {pr_no}/{pr_line} already processed in this batch."`
+     - **Invalid Manufacturing Plant:** Lines with plant codes other than `PUN1` and `CHK1` are rejected with reason: `"Invalid plant {plant}: Policy only applies to PUN1 and CHK1."`
+     - **Non-positive Quantity:** Lines with quantity $\le 0$ are rejected with reason: `"Line rejected: quantity <= 0 (qty={qty}). Quantity must be greater than zero."`
+  2. **Sequential Contract Ledger Tracking:**
+     - The batch processor instantiates a `ContractLedger` initialized with the starting consumed values.
+     - When a requirement qualifies for `CONTRACT_PO`, its total requirement value is immediately committed to the ledger so subsequent requirements in the batch see the reduced remaining ceiling in chronological order.
+  3. **Strict 24-Hour Purchase Order Consolidation (Policy 7):**
+     - Requirements concluding with a `PO` decision are sorted by the creation timestamp of their first PR line.
+     - The engine checks for an open PO matching `(supplier_id, plant, route)`. If $0 \le (\text{req\_created\_at} - \text{po\_first\_req\_created\_at}) \le 24\text{ hours}$, the requirement joins that existing PO; otherwise a new sequential PO (`PO-0001`, `PO-0002`, ...) is opened. Sourcing requests are never assigned PO IDs.
+  4. **Final Supplier Status Guard:**
+     - If the 1st preferred supplier for a spot or emergency PO is not `Active`, the engine drops to the next active preferred supplier. If no active preferred suppliers exist, it falls through to a sourcing request (`RFQ` or `RFP`).
+  5. **Determinism:**
+     - All sorting, item matching, clubbing, contract selection, and consolidation routines are 100% deterministic, guaranteeing identical outputs on replay runs.
+- **Why:** Enforces zero silent data loss, upholds strict audit compliance, ensures vendor safety, and mirrors real-world corporate enterprise ERP ingestion standards.
