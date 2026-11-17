@@ -99,3 +99,4 @@ class PolicyRepository:
         self.db.commit()
         self.db.refresh(record)
         return record
+

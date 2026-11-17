@@ -71,3 +71,39 @@ This document tracks edge cases, policy ambiguities, and data inconsistencies di
   2. It automatically falls back to `decision = "SOURCING_REQUEST"`, `route = "RFQ"`, `clause = "Clause 5.5 Fallback"`, setting reason: `"No policy rule matched; default fallback to RFQ with buyer review flag"`.
   3. A record is logged in `data_quality_issues` under `issue_type = "UNMATCHED_POLICY_RULE"` with severity `WARNING`.
 - **Why:** The safest procurement principle is: when in doubt, get quotes. Defaulting to competitive sourcing prevents unauthorized sole-source PO commitments, avoids system failure, and prompts human buyer intervention in the workspace.
+
+---
+
+### Decision 9: Defining the 365-day PO history window and boundary operators
+- **What I noticed:** Clause 3.1(b) specifies *"the price on the most recent PO for the item in the 365 days before the requirement date"*, and Clauses 5.3/5.4 require that the item was *"bought from an Active supplier in the last 365 days"*.
+- **What I decided:**
+  1. The 365-day lookback window is anchored to the requirement's first line creation date (`requirement_date`), NOT the batch execution date.
+  2. The valid PO date filter is `0 <= (requirement_date - po_date).days <= 365` (i.e. `po_date <= requirement_date`). Any purchase order dated after the requirement date is strictly ignored.
+  3. If multiple historical POs exist on the latest date, tie-breaking selects the highest `po_number`.
+- **Why:** Requisitions must be judged strictly against knowledge available as of their creation time. Anchoring to `requirement_date` ensures strict historical reproducibility regardless of when batch processing is triggered.
+
+---
+
+### Decision 10: Contract ceiling ledger commitment timing
+- **What I noticed:** Clause 4.2 dictates that *"Requirements consume ceiling in order of requirement date"*. In Clause 3.1(a), candidate contracts are evaluated for remaining ceiling to determine requirement valuation.
+- **What I decided:**
+  1. Testing ceiling during the valuation phase is a **non-committing probe**: it tests if `current_consumed + (quantity * contract_rate) <= value_ceiling`.
+  2. The contract's consumed value in the `ContractLedger` is **committed only when `route == "CONTRACT_PO"` is finalized**.
+  3. If a requirement bypasses a contract (e.g. Capex equipment under Rule 5.1 routed to `CAPEX_SOURCING`) or fails to use it, the contract ceiling is not depleted.
+- **Why:** Depleting contract ceilings for requirements that never result in a contract purchase order would falsely exhaust corporate credit limits and artificially force subsequent valid PRs into unnecessary sourcing RFQs.
+
+---
+
+### Decision 11: Unit of Measure (UoM) normalization and integrity
+- **What I noticed:** Requisitions could potentially introduce conflicting or lowercase UoMs (e.g. `nos`, `Nos`, `NOS`).
+- **What I decided:**
+  1. Ingestion strips whitespace and normalizes all UoMs to uppercase canonical strings (`NOS`, `KG`, `LTR`, `SET`, `PAIR`, etc.).
+  2. Clubbing and valuation use the canonical item master UoM. If a PR line specifies an inconsistent unit that cannot be converted, it is logged to `data_quality_issues`.
+- **Why:** Contract rates and standard prices are fixed per unit. Ensuring uniform UoMs prevents severe magnitude errors in total requirement valuation.
+
+---
+
+### Decision 12: Tie-breaking among rate contracts with identical rates
+- **What I noticed:** Clause 4.3 specifies choosing the contract with the lowest rate that has ceiling, but is silent on how to break ties if multiple contracts have identical rates.
+- **What I decided:** In the case of identical lowest rates, select the contract with the earlier `start_date` (oldest active contract first), followed by `contract_id` ascending.
+- **Why:** Prioritizing older active commitments respects corporate vendor tenure and guarantees deterministic resolution.

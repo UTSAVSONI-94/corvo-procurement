@@ -17,6 +17,7 @@ Per task guidelines, AI tooling was used for development assistance and is integ
    - Code architecture, decision engine design, data modeling, and business logic decisions were authored by me.
    - Designed SQLAlchemy 2 models and resilient loaders in Stage 2 with data quality isolation.
    - Designed the declarative JSON policy schema, safe AST condition evaluator (no eval), and historical policy repository in Stage 3.
+   - Built pure Python decision engine core (item matcher with spec conflict guards, deterministic PR clubber, dynamic contract ledger, and valuation hierarchy) in Stage 4.
 
 2. **Runtime Chat & Policy Extraction:**
    - **Chat Requisition Intake:** An LLM-backed chat assistant parses conversational user inputs (e.g., *"need 200 nitrile gloves for Chakan next Friday"*), validates missing fields against `item_master` and plant constraints, and prompts for clarification before creating a draft PR.

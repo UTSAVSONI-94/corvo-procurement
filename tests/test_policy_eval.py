@@ -291,3 +291,4 @@ def test_policy_repository_effective_date_lookup():
     assert policy_nov_16.thresholds.spot_limit == Decimal("250000.00")
 
     db.close()
+
