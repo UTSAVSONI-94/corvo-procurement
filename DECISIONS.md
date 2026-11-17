@@ -51,3 +51,23 @@ This document tracks edge cases, policy ambiguities, and data inconsistencies di
   3. **No silent drops:** Every row from `sample_pr_batch.csv` is preserved in `pr_lines`. Rows with data defects (e.g. `PUN2`, zero quantity, blank item codes) are logged into a queryable `data_quality_issues` table with structured metadata (`file_source`, `row_identifier`, `issue_type`, `severity`, `raw_data`).
   4. **Resilient foreign key validation:** Ingestion loaders verify foreign key integrity (e.g. `po_history -> suppliers/items`, `contract_lines -> contracts/items`) and record orphan references into `data_quality_issues` rather than failing the transaction or crashing the seed process.
 - **Why:** Production procurement systems must never discard requisitions without an audit trail. Storing the raw lines while raising actionable data quality alerts ensures full traceability and allows buyers to inspect flagged items in their workspace.
+
+---
+
+### Decision 7: Policy effective date binding to requirement creation date
+- **What I noticed:** Procurement policy versions carry an `effective_from` date (e.g. `v5.0` effective `2026-04-01`, and future amendments). When processing batches containing requisitions spread across days or weeks, a policy amendment might become active mid-batch.
+- **What I decided:**
+  1. The policy version bound to any requirement is dictated strictly by the requirement's creation date (`requirement_date` = creation date of its earliest line per Clause 2.3), never by the current wall-clock date.
+  2. `PolicyRepository.get_active_policy(as_of_date)` queries for the active version where `effective_from <= requirement_date`, ordered by `effective_from DESC, id DESC`.
+  3. Requisitions created prior to an amendment's effective date are processed under the older active policy version, while those created on or after the effective date adopt the amendment.
+- **Why:** In enterprise governance, requisitions are judged against the policy rules in force when the demand was officially committed. This guarantees historical audit integrity, prevents retroactive rule distortions, and ensures consistent decision reproducibility across test runs.
+
+---
+
+### Decision 8: Default fallback route when no policy rule matches
+- **What I noticed:** Clause 5.1 through 5.6 partition normal requirement paths. However, because future policies can be modified via JSON amendments (altering category rules or adding complex plant filters), a poorly configured or gapped condition tree could conceivably fail to match a requirement.
+- **What I decided:**
+  1. If no rule in the active policy's `decision_rules` list matches, the engine will NOT crash or leave the requirement unassigned.
+  2. It automatically falls back to `decision = "SOURCING_REQUEST"`, `route = "RFQ"`, `clause = "Clause 5.5 Fallback"`, setting reason: `"No policy rule matched; default fallback to RFQ with buyer review flag"`.
+  3. A record is logged in `data_quality_issues` under `issue_type = "UNMATCHED_POLICY_RULE"` with severity `WARNING`.
+- **Why:** The safest procurement principle is: when in doubt, get quotes. Defaulting to competitive sourcing prevents unauthorized sole-source PO commitments, avoids system failure, and prompts human buyer intervention in the workspace.

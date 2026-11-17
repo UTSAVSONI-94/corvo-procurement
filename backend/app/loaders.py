@@ -499,44 +499,24 @@ class DataLoader:
             if not self.db.query(User).filter_by(username=username).first():
                 self.db.add(User(username=username, name=name, role=role, email=email))
 
-        # 2. Seed active policy v5.0
-        policy_rules = {
-            "version": "v5.0",
-            "effective_date": "2026-04-01",
-            "limits": {
-                "spot_po_max_inr": 200000.0,
-                "emergency_po_max_inr": 500000.0,
-                "rfq_max_inr": 1000000.0,
-            },
-            "windows": {
-                "clubbing_calendar_days": 14,
-                "need_by_calendar_days": 7,
-                "po_history_lookback_days": 365,
-                "preferred_supplier_lookback_days": 548,
-                "po_consolidation_hours": 24,
-            },
-            "sourcing_supplier_counts": {
-                "rfq": 3,
-                "rfp": 5,
-                "capex": 5,
-            },
-            "rule_order": [
-                {"id": "5.1", "name": "Capex items always go to sourcing", "route": "CAPEX_SOURCING"},
-                {"id": "5.2", "name": "Valid rate contract with remaining ceiling", "route": "CONTRACT_PO"},
-                {"id": "5.3", "name": "Emergency under limit with active purchase history", "route": "EMERGENCY_PO"},
-                {"id": "5.4", "name": "Spot PO under limit with active purchase history", "route": "SPOT_PO"},
-                {"id": "5.5", "name": "RFQ under limit or small items without purchase history", "route": "RFQ"},
-                {"id": "5.6", "name": "RFP for large value requirements", "route": "RFP"},
-            ],
-        }
+        # 2. Seed active policy v5.0 from JSON file
+        policy_file = os.path.join(os.path.dirname(__file__), "..", "policies", "corvo_v5_0.json")
+        if os.path.exists(policy_file):
+            with open(policy_file, "r", encoding="utf-8") as pf:
+                policy_data = json.load(pf)
+                policy_json_str = json.dumps(policy_data, indent=2)
+                eff_date = datetime.strptime(policy_data["effective_from"], "%Y-%m-%d").date()
+        else:
+            eff_date = datetime.strptime("2026-04-01", "%Y-%m-%d").date()
+            policy_json_str = "{}"
 
         v5 = self.db.query(PolicyVersion).filter_by(version_label="v5.0").first()
         if not v5:
             v5 = PolicyVersion(
                 version_label="v5.0",
-                effective_from=datetime.strptime("2026-04-01", "%Y-%m-%d").date(),
+                effective_from=eff_date,
                 status="ACTIVE",
-                rules_json=json.dumps(policy_rules, indent=2),
+                rules_json=policy_json_str,
                 source_text="Corvo Engineering Procurement Policy v5.0",
                 created_by="Head of Procurement",
                 created_at=datetime.now(),
@@ -544,6 +524,10 @@ class DataLoader:
                 approved_at=datetime.now(),
             )
             self.db.add(v5)
+        else:
+            v5.effective_from = eff_date
+            v5.status = "ACTIVE"
+            v5.rules_json = policy_json_str
 
         self.db.commit()
 

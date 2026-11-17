@@ -123,3 +123,4 @@ def test_policy_and_users_seeded(db_session):
     usernames = {u.username for u in users}
     assert "buyer_priya" in usernames
     assert "admin_procurement" in usernames
+

@@ -1,0 +1,174 @@
+{
+  "version": "v5.0",
+  "effective_from": "2026-04-01",
+  "title": "Corvo Engineering Procurement Policy v5.0",
+  "description": "Standard PR-to-PO procurement policy applying to plants PUN1 (Bhosari) and CHK1 (Chakan).",
+  "parameters": {
+    "club_window_days": 14,
+    "need_by_window_days": 7,
+    "po_history_days": 365,
+    "preferred_history_days": 548,
+    "consolidation_window_hours": 24,
+    "min_rfq_suppliers": 3,
+    "min_rfp_suppliers": 5,
+    "min_capex_suppliers": 5
+  },
+  "thresholds": {
+    "spot_limit": 200000.00,
+    "emergency_limit": 500000.00,
+    "rfp_threshold": 1000000.00
+  },
+  "consolidation": {
+    "same_fields": ["supplier_id", "plant", "route"],
+    "window_hours": 24
+  },
+  "guards": [
+    "BLOCKED_OR_INACTIVE_SUPPLIERS_NEVER_RECEIVE_PO",
+    "BLOCKED_OR_INACTIVE_SUPPLIERS_NEVER_SUGGESTED_FOR_SOURCING"
+  ],
+  "decision_rules": [
+    {
+      "id": "1.2",
+      "clause": "Clause 1.2",
+      "name": "New Item Sourcing",
+      "description": "A line that matches no item master item is a new item; always goes to sourcing, never clubbed, no supplier suggestions.",
+      "when": {
+        "field": "is_new_item",
+        "op": "eq",
+        "value": true
+      },
+      "outcome": {
+        "decision": "SOURCING_REQUEST",
+        "route": "NEW_ITEM_SOURCING",
+        "supplier_mode": "NONE",
+        "suggest_count": 0,
+        "price_mode": "ESTIMATED_PRICE",
+        "needs_approval": false,
+        "notes": "Valued at quantity * requester estimated unit price"
+      }
+    },
+    {
+      "id": "5.1",
+      "clause": "Clause 5.1",
+      "name": "Capex Equipment Sourcing",
+      "description": "The item type is Capex. Sourcing request requiring Capex approval with 5 suggested suppliers.",
+      "when": {
+        "field": "item_type",
+        "op": "eq",
+        "value": "Capex"
+      },
+      "outcome": {
+        "decision": "SOURCING_REQUEST",
+        "route": "CAPEX_SOURCING",
+        "supplier_mode": "SUGGEST_N",
+        "suggest_count": 5,
+        "price_mode": "ESTIMATED_PRICE",
+        "needs_approval": true,
+        "notes": "Suggest 5 suppliers per Section 6.4. Requires capex approval."
+      }
+    },
+    {
+      "id": "5.2",
+      "clause": "Clause 5.2",
+      "name": "Rate Contract Purchase Order",
+      "description": "A valid rate contract exists with remaining value ceiling.",
+      "when": {
+        "field": "contract_usable",
+        "op": "eq",
+        "value": true
+      },
+      "outcome": {
+        "decision": "PO",
+        "route": "CONTRACT_PO",
+        "supplier_mode": "CONTRACT",
+        "suggest_count": null,
+        "price_mode": "CONTRACT_RATE",
+        "needs_approval": false,
+        "notes": "Awarded to contract supplier at contract rate."
+      }
+    },
+    {
+      "id": "5.3",
+      "clause": "Clause 5.3",
+      "name": "Emergency Purchase Order",
+      "description": "Requirement is marked Emergency, value <= INR 5,00,000, and item bought from an Active supplier in the last 365 days.",
+      "when": {
+        "all": [
+          { "field": "is_emergency", "op": "eq", "value": true },
+          { "field": "value", "op": "lte", "ref": "thresholds.emergency_limit" },
+          { "field": "has_active_supplier_purchase_365d", "op": "eq", "value": true }
+        ]
+      },
+      "outcome": {
+        "decision": "PO",
+        "route": "EMERGENCY_PO",
+        "supplier_mode": "PREFERRED_1",
+        "suggest_count": null,
+        "price_mode": "REFERENCE_PRICE",
+        "needs_approval": false,
+        "notes": "Direct PO to 1st preferred supplier at its reference price."
+      }
+    },
+    {
+      "id": "5.4",
+      "clause": "Clause 5.4",
+      "name": "Spot Purchase Order",
+      "description": "Value below INR 2,00,000, and the item was bought from an Active supplier in the last 365 days.",
+      "when": {
+        "all": [
+          { "field": "value", "op": "lt", "ref": "thresholds.spot_limit" },
+          { "field": "has_active_supplier_purchase_365d", "op": "eq", "value": true }
+        ]
+      },
+      "outcome": {
+        "decision": "PO",
+        "route": "SPOT_PO",
+        "supplier_mode": "PREFERRED_1",
+        "suggest_count": null,
+        "price_mode": "REFERENCE_PRICE",
+        "needs_approval": false,
+        "notes": "Direct spot PO to 1st preferred supplier at its reference price."
+      }
+    },
+    {
+      "id": "5.5",
+      "clause": "Clause 5.5",
+      "name": "Request for Quotation (RFQ)",
+      "description": "Value below INR 10,00,000 (including items never bought in the last 365 days or contract ceiling exceeded).",
+      "when": {
+        "field": "value",
+        "op": "lt",
+        "ref": "thresholds.rfp_threshold"
+      },
+      "outcome": {
+        "decision": "SOURCING_REQUEST",
+        "route": "RFQ",
+        "supplier_mode": "SUGGEST_N",
+        "suggest_count": 3,
+        "price_mode": "REFERENCE_PRICE",
+        "needs_approval": false,
+        "notes": "Suggest 3 suppliers per Section 6.4."
+      }
+    },
+    {
+      "id": "5.6",
+      "clause": "Clause 5.6",
+      "name": "Request for Proposal (RFP)",
+      "description": "Value INR 10,00,000 or more.",
+      "when": {
+        "field": "value",
+        "op": "gte",
+        "ref": "thresholds.rfp_threshold"
+      },
+      "outcome": {
+        "decision": "SOURCING_REQUEST",
+        "route": "RFP",
+        "supplier_mode": "SUGGEST_N",
+        "suggest_count": 5,
+        "price_mode": "REFERENCE_PRICE",
+        "needs_approval": false,
+        "notes": "Suggest 5 suppliers per Section 6.4."
+      }
+    }
+  ]
+}
