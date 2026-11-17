@@ -10,6 +10,8 @@ from .types import (
     RequirementGroup,
     ValuationResult,
     DecisionOutput,
+    RankedSupplier,
+    ScoreBreakdown,
 )
 from .item_matcher import match_item, normalize_text
 from .clubber import club_pr_lines
@@ -22,6 +24,12 @@ from .valuation import (
     value_requirement,
     get_most_recent_po,
     has_active_supplier_purchase,
+)
+from .preferred_suppliers import (
+    build_preferred_supplier_list,
+    suggest_sourcing_suppliers,
+    export_preferred_suppliers_csv,
+    calculate_supplier_score,
 )
 from .policy_eval import evaluate_condition, evaluate_policy_rules, resolve_ref
 from .schema import (
@@ -45,6 +53,8 @@ __all__ = [
     "RequirementGroup",
     "ValuationResult",
     "DecisionOutput",
+    "RankedSupplier",
+    "ScoreBreakdown",
     "match_item",
     "normalize_text",
     "club_pr_lines",
@@ -54,6 +64,10 @@ __all__ = [
     "value_requirement",
     "get_most_recent_po",
     "has_active_supplier_purchase",
+    "build_preferred_supplier_list",
+    "suggest_sourcing_suppliers",
+    "export_preferred_suppliers_csv",
+    "calculate_supplier_score",
     "evaluate_condition",
     "evaluate_policy_rules",
     "resolve_ref",

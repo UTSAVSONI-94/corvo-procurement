@@ -107,6 +107,29 @@ class ValuationResult:
 
 
 @dataclass
+class ScoreBreakdown:
+    component: str  # "frequency", "recency", "contract_held", "on_time", "quality"
+    raw_value: Any
+    weight: Decimal
+    points: Decimal
+
+
+@dataclass
+class RankedSupplier:
+    supplier_id: str
+    supplier_name: str
+    rank: int
+    total_score: Decimal
+    reference_price: Optional[Decimal]
+    po_count: int
+    recency_score: Decimal
+    has_contract: bool
+    on_time_pct: Decimal
+    quality_rating: Decimal
+    breakdown: List[ScoreBreakdown] = field(default_factory=list)
+
+
+@dataclass
 class DecisionOutput:
     requirement_id: str
     decision: str  # "PO" or "SOURCING_REQUEST"
@@ -119,3 +142,4 @@ class DecisionOutput:
     po_id_ref: Optional[str] = None
     clause: str = ""
     reason: str = ""
+

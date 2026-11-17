@@ -107,3 +107,35 @@ This document tracks edge cases, policy ambiguities, and data inconsistencies di
 - **What I noticed:** Clause 4.3 specifies choosing the contract with the lowest rate that has ceiling, but is silent on how to break ties if multiple contracts have identical rates.
 - **What I decided:** In the case of identical lowest rates, select the contract with the earlier `start_date` (oldest active contract first), followed by `contract_id` ascending.
 - **Why:** Prioritizing older active commitments respects corporate vendor tenure and guarantees deterministic resolution.
+
+---
+
+### Decision 13: Preferred Supplier Ranking Formula and Sourcing Top-up Logic
+- **What I noticed:** Policy 6.1 and 6.2 require ranking active suppliers with transaction history or contracts over the last 548 days, but leave the specific ranking algorithm to engineering design provided it reproduces the Worked Examples (Page 5: `ITM-1048`, `ITM-1036`, `ITM-1016`). Furthermore, Policy 6.4 requires topping up to 3 (RFQ) or 5 (RFP/Capex) suppliers from the category if the preferred list is short.
+- **What I decided:**
+  1. **Eligibility Criteria (Policy 6.1):**
+     - Supplier status must be `Active` (case-insensitive). `Blocked` and `Inactive` are unconditionally disqualified.
+     - Must have $\ge 1$ purchase order in the 548 days prior to the as-of requirement date $D$, OR have held a contract covering the item starting on or before date $D$ (even if currently expired).
+  2. **Multi-Criteria Scoring Formula (Policy 6.2):**
+     - **Frequency (30% weight):** $\frac{\text{PO Count in Window}}{\max(\text{PO Count for Item in Window})}$.
+     - **Recency (25% weight):** $1.0$ if the most recent PO was within 90 days; $0.5$ if within 365 days; $0.0$ otherwise.
+     - **Contract Held (20% weight):** $1.0$ if the supplier ever held a contract covering the item starting on or before $D$; $0.0$ otherwise.
+     - **On-Time Delivery (15% weight):** $\frac{\text{on\_time\_pct}}{100.0}$.
+     - **Quality Rating (10% weight):** $\frac{\text{quality\_rating}}{5.0}$.
+     - Weights are configurable via policy parameters (`frequency`, `recency`, `contract_held`, `on_time`, `quality`).
+  3. **Deterministic Tie-Breaking:**
+     - Total score descending $\to$ Last PO date descending $\to$ On-time delivery pct descending $\to$ `supplier_id` ascending.
+  4. **Validation against Worked Examples (2026-11-01):**
+     - `ITM-1048`: 1. S029 (0.9335), 2. S030 (0.5974). S031 excluded (Inactive).
+     - `ITM-1036`: 1. S023 (0.7390), 2. S022 (0.6105), 3. S024 (0.3655).
+     - `ITM-1016`: 1. S009 (0.8415), 2. S010 (0.6230).
+  5. **Sourcing Top-Up Logic (Policy 6.4):**
+     - Begins with preferred suppliers in rank order.
+     - If fewer than $N$ (e.g. 3 for RFQ, 5 for RFP): tops up with active suppliers listed under the item's category, ranked by quality and delivery performance score: $(\frac{\text{quality}}{5.0} \times 0.60) + (\frac{\text{on\_time}}{100} \times 0.40)$ descending.
+     - This produces the exact worked example outcomes:
+       - `ITM-1066` (Worked Example 9): S043 (preferred #1), S044 (preferred #2), S042 (category top-up) $\to$ `['S043', 'S044', 'S042']`.
+       - `ITM-1006` (Worked Example 10): 0 preferred suppliers $\to$ top 3 active Steel & Metals suppliers `['S003', 'S002', 'S005']` (excluding blocked S004).
+     - New items get zero automatic suggestions.
+  6. **Explainability & Breakdown:**
+     - The engine outputs a granular `ScoreBreakdown` per supplier with `{component, raw_value, weight, points}` to power the UI's "Why ranked here" explanation.
+- **Why:** Transparent linear scoring ensures fairness, auditability, and 100% adherence to procurement compliance standards while accurately reproducing historical buyer choices.

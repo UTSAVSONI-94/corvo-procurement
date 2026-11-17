@@ -115,3 +115,4 @@ def select_best_contract(
     best_contract, best_line = eligible[0]
 
     return best_contract, best_line.rate, True, lowest_rate
+
