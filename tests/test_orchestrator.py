@@ -397,3 +397,4 @@ def test_determinism_replay(test_reference_data, policy_v5):
         assert r1.suggested_supplier_ids == r2.suggested_supplier_ids
         assert r1.policy_version == r2.policy_version
         assert r1.reason == r2.reason
+

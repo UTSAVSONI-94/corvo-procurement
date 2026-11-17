@@ -309,20 +309,21 @@ def suggest_sourcing_suppliers(
         if supp.status.strip().lower() != "active":
             continue
 
-        # Check if supplier lists this category (split comma-separated or list)
+        # Check if supplier lists this category (split comma/semicolon separated or list)
         raw_cats = supp.categories
         if isinstance(raw_cats, str):
-            supp_cats = [c.strip().lower() for c in raw_cats.split(",")]
+            import re
+            supp_cats = [c.strip().lower() for c in re.split(r"[,;]", raw_cats)]
         else:
             supp_cats = [c.strip().lower() for c in (raw_cats or [])]
 
         if norm_cat in supp_cats:
             on_time = supp.on_time_pct or Decimal("0")
             quality = supp.quality_rating or Decimal("0")
-            perf_score = (quality / Decimal("5.0") * Decimal("0.60")) + (on_time / Decimal("100") * Decimal("0.40"))
-            category_candidates.append((perf_score, quality, on_time, s_id))
+            perf_score = (on_time / Decimal("100") * Decimal("0.50")) + (quality / Decimal("5.0") * Decimal("0.50"))
+            category_candidates.append((perf_score, on_time, quality, s_id))
 
-    # Sort category candidates by perf_score DESC, quality DESC, on_time DESC, s_id ASC
+    # Sort category candidates by perf_score DESC, on_time DESC, quality DESC, s_id ASC
     category_candidates.sort(
         key=lambda x: (-x[0], -x[1], -x[2], x[3])
     )

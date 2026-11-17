@@ -164,3 +164,16 @@ This document tracks edge cases, policy ambiguities, and data inconsistencies di
   5. **Determinism:**
      - All sorting, item matching, clubbing, contract selection, and consolidation routines are 100% deterministic, guaranteeing identical outputs on replay runs.
 - **Why:** Enforces zero silent data loss, upholds strict audit compliance, ensures vendor safety, and mirrors real-world corporate enterprise ERP ingestion standards.
+
+---
+
+### Decision 15: Semicolon Delimiters in Supplier Categories & Category Top-Up Ranking
+- **What I noticed:**
+  1. In `supplier_master.csv`, supplier categories are delimited not only by commas `,` but also by semicolons `;` (e.g. `S020 Vertex CNC Systems` specifies `Electrical Spares;Capital Equipment`). Splitting solely on commas caused `S020` to be omitted from the `"Capital Equipment"` category pool, resulting in Worked Example 12 (`EOT crane 5 ton`) returning only 4 suggested suppliers instead of the 5 requested in Policy Section 6.4.
+  2. The policy states: *"top up with other ACTIVE suppliers listing the item's category, best delivery and quality first."* Testing candidate weights across Worked Examples 9 (`CMM calibration`), 10 (`Aluminium plate`), and 12 (`EOT crane`) revealed that an equal 50/50 weighting:
+     $$\text{perf\_score} = \left(\frac{\text{on\_time\_pct}}{100} \times 0.50\right) + \left(\frac{\text{quality\_rating}}{5.0} \times 0.50\right)$$
+     with tie-breaking on `on_time_pct DESC`, `quality_rating DESC`, `supplier_id ASC`, reproduces the exact supplier suggestions and ordering across all three worked examples.
+- **What I decided:**
+  1. Updated supplier category parsing across the engine to split on regex `[,;]`, ensuring multi-category vendors like `S020` are accurately indexed.
+  2. Standardized the sourcing category top-up formula to an equal 50% delivery and 50% quality weighting.
+- **Why:** Fully adheres to Policy 6.4, ensures no valid candidate suppliers are inadvertently disqualified by punctuation formatting, and achieves 100% precision against the human-curated worked examples.
