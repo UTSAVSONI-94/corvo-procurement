@@ -1,0 +1,13 @@
+CORVO ENGINEERING - POLICY AMENDMENT MEMORANDUM
+Date: 2026-11-12
+Reference: AMEND-2026-003
+Effective Date: 2026-11-15
+
+Subject: Mandatory Competitive Quotes for Safety and PPE Category
+
+To ensure compliance with industrial safety audits:
+1. Rule 5.3b (Inserted before Rule 5.4): Any requisition under category "Safety / PPE" exceeding Rs 50,000 must be routed to competitive RFQ with minimum 3 supplier quotes, regardless of prior single-source history.
+2. Effective from 2026-11-15.
+
+Approved by: Head of Procurement
+

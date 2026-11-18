@@ -1355,6 +1355,34 @@ def list_audit_logs_endpoint(
     ]
 
 
+@app.post("/api/admin/reset-baseline")
+def reset_baseline_endpoint(db: Session = Depends(get_db)):
+    """
+    Resets the database state to the pristine baseline:
+    - Removes all rehearsal policy versions (id > 1)
+    - Sets policy v5.0 back to ACTIVE status
+    - Refreshes the PolicyRepository in-memory cache
+    """
+    db.query(PolicyDiff).filter(PolicyDiff.proposed_version_id > 1).delete()
+    db.query(PolicyVersion).filter(PolicyVersion.id > 1).delete()
+
+    v5 = db.query(PolicyVersion).filter_by(version_label="v5.0").first()
+    if v5:
+        v5.status = "ACTIVE"
+    db.commit()
+
+    repo = PolicyRepository(db)
+    repo._refresh_cache()
+
+    return {
+        "status": "success",
+        "message": "Database reset to pristine baseline with Policy v5.0 active",
+        "active_version": "v5.0",
+        "timestamp": datetime.now().isoformat(),
+    }
+
+
+
 # Mount frontend static build if dist exists (for Docker & Production)
 frontend_dist = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "frontend", "dist")
 if os.path.exists(frontend_dist):

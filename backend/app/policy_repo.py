@@ -12,6 +12,27 @@ from backend.engine.schema import PolicyDocument
 class PolicyRepository:
     def __init__(self, db: Session):
         self.db = db
+        self._doc_cache = {}
+        self._active_records = []
+        self._refresh_cache()
+
+    def _refresh_cache(self):
+        try:
+            records = (
+                self.db.query(PolicyVersion)
+                .filter(PolicyVersion.status == "ACTIVE")
+                .order_by(
+                    desc(PolicyVersion.effective_from),
+                    desc(PolicyVersion.id),
+                )
+                .all()
+            )
+            self._active_records = [
+                (rec.effective_from, rec.rules_json)
+                for rec in records
+            ]
+        except Exception:
+            self._active_records = []
 
     def _normalize_date(self, dt: Union[date, datetime, str]) -> date:
         if isinstance(dt, datetime):
@@ -28,8 +49,16 @@ class PolicyRepository:
         Retrieves the active policy version effective as of the given date.
         Picks the ACTIVE version with the latest effective_from <= as_of_date.
         Per requirement, the requirement date, NOT today's date, decides the version.
+        Uses in-memory pre-cached active versions to eliminate N+1 queries.
         """
         req_date = self._normalize_date(as_of_date)
+
+        for eff_date, rules_json in self._active_records:
+            if eff_date <= req_date:
+                if rules_json not in self._doc_cache:
+                    data = json.loads(rules_json)
+                    self._doc_cache[rules_json] = PolicyDocument(**data)
+                return self._doc_cache[rules_json]
 
         record = (
             self.db.query(PolicyVersion)
@@ -92,6 +121,7 @@ class PolicyRepository:
 
         self.db.commit()
         self.db.refresh(record)
+        self._refresh_cache()
         return record
 
     def activate_version(self, version_label: str, approved_by: str) -> PolicyVersion:
@@ -104,5 +134,6 @@ class PolicyRepository:
         record.approved_at = datetime.now()
         self.db.commit()
         self.db.refresh(record)
+        self._refresh_cache()
         return record
 
