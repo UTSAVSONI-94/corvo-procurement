@@ -94,8 +94,8 @@ docker compose up --build
 
 ## Hosted Cloud Deployment
 
-- **Live Application URL:** `https://corvo-procurement.onrender.com` *(Replace with your deployed Render URL)*
-- **Health Check / Cold Start Monitor:** `https://corvo-procurement.onrender.com/health`
+- **Live Application URL:** [`https://corvo-procurement-s5sq.onrender.com`](https://corvo-procurement-s5sq.onrender.com)
+- **Health Check / Cold Start Monitor:** [`https://corvo-procurement-s5sq.onrender.com/health`](https://corvo-procurement-s5sq.onrender.com/health)
 
 > **Note on Cold Starts:** Free-tier instances on Render/Railway spin down after inactivity. The first request may take 30–50 seconds to initialize. The `/health` endpoint can be pinged by uptime monitors to maintain a warm instance. Master data and active policies are persisted in managed PostgreSQL and are never wiped on container restarts or redeploys.
 
