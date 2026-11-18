@@ -1,140 +1,124 @@
-# Engineering Approach & System Architecture
+# My Engineering Approach: Building Corvo Procurement
 
-## 1. Executive Summary & Core Philosophy
-The Corvo Engineering Autonomous Procurement System is a production-grade, policy-driven requisition-to-order engine. It automates the operational triage of Purchase Requisitions (PRs), evaluating incoming industrial demands against corporate policy constraints, active contracts, supplier transaction histories, and operational pricing rules to generate either approved Purchase Orders (POs) or structured Sourcing Requests (RFQs/RFPs).
+## How I Built This & Architectural Choices
 
-Our engineering design is built on three foundational principles:
-1. **Zero AI In The Critical Decision Path:** All procurement rules, eligibility checks, line clubbing, contract ceiling allocations, and supplier scoring are executed by a pure, deterministic Python engine (`backend/engine/`). Business logic never relies on non-deterministic LLM prompting, probabilistic weights, or unsafe expression evaluation (`eval()`).
-2. **Transparent, Reversible Policy Governance:** Policies are declarative versioned JSON structures stored with effective dates. Corporate rule changes—such as raising spot limits, creating plant-specific thresholds, or inserting mandatory RFQ rules—take effect without modifying a single line of application source code.
-3. **Enterprise Auditability & Data Hygiene:** No raw requisition is ever silently dropped. Every state transition (policy ingestion, buyer override, contract extraction confirmation, and order creation) is immutably logged with actor identities, timestamps, and before/after states.
+I wanted to build Corvo's procurement engine the way real production-grade industrial software is built: **rock-solid determinism in the financial/decision path, clean architectural seams, and zero black-box magic where real company money is on the line.**
 
----
+The biggest trap in "AI-powered procurement" is letting an LLM decide who gets a Purchase Order or what price gets paid. If an LLM hallucinates an item rate, or invents a vendor, or misinterprets an emergency threshold, that’s an audit violation or a commercial loss. 
 
-## 2. System Architecture & Monorepo Structure
-
-The repository is structured as a modular, decoupled monorepo:
-
-```
-├── backend/
-│   ├── engine/               # Pure Python Decision Engine (Zero external dependencies)
-│   │   ├── item_matcher.py       # Catalog matching, normalisation, spec conflict guards
-│   │   ├── clubber.py            # Temporal line clubbing (14d creation, 7d need-by tolerance)
-│   │   ├── contracts.py          # Sequential contract ledger & ceiling tracking
-│   │   ├── valuation.py          # 3-tier valuation hierarchy & emergency bypass
-│   │   ├── preferred_suppliers.py# 5-factor scoring model & category top-up ranking
-│   │   ├── orchestrator.py       # Deterministic pipeline & 24h PO consolidation
-│   │   ├── condition_evaluator.py# Recursive AST condition evaluator (no eval)
-│   │   ├── schema.py             # Pydantic v2 schemas for policy documents
-│   │   └── types.py              # Pure typed dataclasses for engine I/O
-│   ├── app/                  # FastAPI Application Layer
-│   │   ├── models.py             # SQLAlchemy 2.0 ORM models
-│   │   ├── database.py           # Engine setup & session lifecycle
-│   │   ├── loaders.py            # Master CSV loaders with anomaly isolation
-│   │   ├── seed.py               # Idempotent DB seeder
-│   │   ├── policy_service.py     # Structural diffing, plain-English summary, batch rehearsal
-│   │   ├── contract_service.py   # Multi-strategy PDF extraction & reconciliation
-│   │   ├── chat_service.py       # Deterministic slot-filling assistant & state manager
-│   │   ├── cli.py                # Standalone offline batch processor CLI
-│   │   └── main.py               # REST API endpoints & route controllers
-│   ├── policies/             # Active and baseline declarative policy JSON documents
-│   └── scripts/              # Automated rehearsal and migration utilities
-├── frontend/                 # React 18 + Vite + Tailwind CSS Single-Page Application
-│   ├── src/
-│   │   ├── api.js                # Clean API client talking exclusively to FastAPI backend
-│   │   ├── components/           # Universal Header, role switchers, policy badge
-│   │   └── views/                # 7 specialized role-based views
-│   └── e2e/                  # Playwright End-to-End smoke test suite
-├── docs/                     # Data profile, field mappings, and schema specifications
-├── tests/                    # 10 comprehensive pytest test suites (99 tests)
-├── kit/                      # Original corporate test master CSVs, PDFs, and worked examples
-└── corvo_procurement.db      # SQLite database seeded with master data
-```
+So my core architectural boundary is simple:
+- **`backend/engine/` is pure, deterministic Python.** It has 0 framework imports (no FastAPI, no SQLAlchemy, no OpenAI/Gemini SDKs, no network calls). It takes plain Python dataclasses and outputs decision dataclasses. This made it fast, 100% testable in pytest, and guaranteed to produce identical results on every replay.
+- **The LLM is kept strictly at the edges:** parsing unstructured user text in the chat assistant (slot-filling quantities, plants, and dates) and extracting proposed clauses from uploaded policy amendment PDFs into structured JSON for buyer review.
+- **FastAPI (`backend/app/`)** serves purely as the operational persistence and API orchestration layer.
+- **React + Tailwind (`frontend/`)** gives buyers and requesters a clean UI where every screen has one obvious primary action, backed by Playwright end-to-end smoke tests.
 
 ---
 
-## 3. What Was Used (Technologies, Libraries, and Rationale)
+## What I Used & Why
 
-Every technology in the stack was selected for reliability, speed, and strict adherence to enterprise software standards:
+I chose tools for reliability, standard compliance, and developer ergonomics:
 
-### Backend & Decision Engine
-- **Python 3.14 (Virtual Environment):** Clean runtime utilizing modern type hinting and standard library speed improvements.
-- **Pydantic v2:** Used strictly for policy document schema validation, parameter constraints, and API contract enforcement.
-- **RapidFuzz:** Utilized in `item_matcher.py` for token-set and partial ratio scoring to match colloquial plant descriptions against canonical item master records, coupled with strict alphanumeric specification extraction (e.g., ensuring bearing `6205` never matches `6305`).
-- **FastAPI & Uvicorn:** High-performance asynchronous API framework providing automatic OpenAPI schema generation, structured request validation, and clean dependency injection.
-- **SQLAlchemy 2.0:** Declarative database ORM supporting SQLite for local operation and seamless migration to enterprise PostgreSQL.
-- **pypdf & pdfplumber:** Multi-strategy PDF text parsing for signed rate contracts and policy amendment documents, paired with regular expressions for deterministic metadata extraction.
+1. **Python 3.14 & Standard Library:**
+   - Kept currency handling in Python's `Decimal` module everywhere (valuation, line values, contract ceilings, and unit rates) to prevent floating-point rounding errors.
+   - Used standard `dataclasses` for all internal engine objects.
 
-### Frontend
-- **React 18 + Vite:** Fast, modern SPA framework providing instant HMR and lightweight bundle production.
-- **Tailwind CSS:** Utility-first styling delivering clean, accessible, and responsive user interfaces with high visual contrast.
-- **Lucide React:** Consistent iconography for procurement entities, state badges, and system actions.
-- **Playwright:** End-to-end browser automation framework running against live backend and frontend instances.
+2. **Pydantic v2:**
+   - Used solely to validate policy JSON schemas and enforce parameter boundaries (windows, limits, rule orders).
 
----
+3. **RapidFuzz:**
+   - Used for token-set fuzzy matching when requesters provide informal slang (`"brg 6308 ZZ for maintenance"`). But I paired this with a strict alphanumeric spec guard so that bearing `6205` can never match bearing `6305`, regardless of fuzzy score.
 
-## 4. Engineering Workflow by Stage
+4. **SQLAlchemy 2.0 & SQLite:**
+   - Built declarative models with strict foreign keys, unique constraints, and indexes. Kept an idempotent `python -m app.seed` command that re-runs cleanly without duplicating data.
 
-The project was implemented in 12 disciplined stages:
+5. **pypdf & pdfplumber:**
+   - Multi-strategy text extraction for signed PDF rate contracts and policy memos, extracting Schedule A tables and metadata with confidence scoring.
 
-### Stage 1: Data Profiling & Hygiene Analysis
-- Extensively profiled 6 CSV datasets (73 items, 48 suppliers, 468 POs, 10 contracts, 186 PR lines, 2 plants).
-- Discovered and isolated edge cases: colloquial item descriptions missing item codes, invalid plant `PUN2`, zero-quantity requests, semicolon-delimited multi-category suppliers, and blocked vendors holding contracts.
+6. **React 18, Vite & Tailwind CSS:**
+   - Fast, minimal frontend with custom role switching (`Requester`, `Buyer`, `Procurement Admin`), live active policy badge, expandable requirement drawers, and visual contract ceiling bars.
 
-### Stage 2: Database Schema & Idempotent Ingestion
-- Authored SQLAlchemy 2 models with primary keys, indexes, foreign keys, and unique constraints.
-- Developed `python -m app.seed` (and `python -m backend.app.seed`) verifying idempotency: runs repeatedly with zero duplicate records and zero data loss.
-
-### Stage 3: Declarative Policy Schema & Safe Condition Evaluator
-- Designed a versioned JSON policy schema separating parameters (windows, lookback periods), named thresholds, and an ordered sequence of rules.
-- Created a recursive AST evaluator (`condition_evaluator.py`) supporting leaf operators (`eq`, `ne`, `lt`, `lte`, `gt`, `gte`, `in`, `not_in`) and combinators (`all`, `any`, `not`). **Prohibited `eval()`** to eliminate remote code execution vulnerabilities.
-
-### Stage 4: Pure Engine Core (Matching, Clubbing, Contracts, Valuation)
-- **`item_matcher.py`:** Standardizes text, expands industrial abbreviations (`brg`, `hyd`, `cyl`, `ss`, `ms`), computes fuzzy token similarity, and enforces a mandatory spec-token check. Novel items drop to `NEW`.
-- **`clubber.py`:** Sorts PR lines by `(created_at, pr_no, line_no)` and clubs identical items at the same plant within a 14-day creation window and ±7-day need-by tolerance.
-- **`contracts.py`:** Sequential `ContractLedger` providing non-committing probes during valuation and binding commitments when `CONTRACT_PO` is awarded.
-- **`valuation.py`:** Implements the 3-tier valuation hierarchy (Contract rate $\to$ Last 365d PO price $\to$ Standard master price) and emergency PO bypass rules.
-
-### Stage 5: Multi-Criteria Preferred Supplier Ranking
-- Implemented Section 6 ranking over a 548-day window with policy-weighted parameters:
-  - Frequency (0.30), Recency (0.25), Contract Held (0.20), On-Time % (0.15), Quality Rating (0.10).
-  - Deterministic tie-breaking on last PO date, on-time percentage, and supplier ID.
-  - Sourcing top-up logic expanding supplier pools up to 3 (RFQ) or 5 (RFP/Capex) using balanced 50/50 quality and delivery scores.
-
-### Stage 6: Batch Orchestrator & Purchase Order Consolidation
-- Assembled the end-to-end pipeline: Item Match $\to$ Clubbing $\to$ Policy Version Selection $\to$ Fact Generation $\to$ First-Match Rule Execution $\to$ Active Supplier Guard $\to$ 24-Hour PO Consolidation.
-- PO-ending requirements for the same supplier, plant, and route within 24 hours of that PO's first requirement share a single consolidated PO number (`PO-0001`, `PO-0002`).
-
-### Stage 7: Regression Verification Across All 14 Worked Examples
-- Encoded all 14 official worked examples as automated pytest cases against real master data.
-- Ran all 186 sample PR lines: 0 unhandled exceptions, 0 blocked suppliers awarded, and 100% agreement on routes, pricing, and supplier selections.
-
-### Stage 8: Policy Ingestion, Diffing, and Batch Rehearsal
-- Built endpoints for natural-language amendment parsing, RFC 6902 JSON patch generation, structural diff generation, and batch rehearsal previews.
-- Verified zero-code extensibility via `rehearse_amendments.py`, testing global threshold updates, plant-specific rules, and category-level RFQ overrides.
-
-### Stage 9: Contract Management & PDF Reconciliation
-- Reconciled physical PDFs with the CSV register: discovered signed contract `RC-2026-031` (Pneumatic Point S021) signed mid-November 2026.
-- Established legal authority rule: signed PDF terms supersede CSV registers; new contracts start with consumed value ₹0.00.
-- Implemented PDF upload, text extraction, preview editing, and confirmation APIs.
-
-### Stage 10: Conversational Chat Intake & Offline Batch CLI
-- Developed `POST /api/chat` with tool calling and a deterministic rule-based slot filler.
-- Refused to guess quantities or plants, showed top-3 candidate chips when ambiguous, and supported `NEW` item intake with mandatory estimated pricing.
-- Added `/api/pr/upload` CSV pre-validation and `/api/export/decisions` adhering strictly to required 13-column schemas. Built standalone CLI `python -m backend.app.cli process <in.csv> <out.csv>`.
-
-### Stage 11: Responsive React Frontend & Playwright Smoke Suite
-- Developed clean, minimal Tailwind UI with 7 specialized views: Requester Chat, Batches, Buyer Workspace, Preferred Suppliers, Contracts, Policy Management, and Audit Log.
-- Enforced **one obvious primary action** per screen.
-- Automated 3 end-to-end browser smoke tests in Playwright verifying complete user journeys.
+7. **Playwright:**
+   - End-to-end browser automation testing real user flows (Chat to PR, Batch upload to PO approval, Policy amendment ingestion to activation).
 
 ---
 
-## 5. Summary of Key Decisions & Governance
+## How I Tackled the Implementation (Step by Step)
 
-Detailed decision logs, edge-case evaluations, and policy interpretations are documented in **`DECISIONS.md`**. Key highlights:
-- **Decision 1 & 2:** Lines with invalid plants (`PUN2`) or zero quantities are marked `NOT_PROCESSED` with clear audit explanations, preserving data integrity without halting the batch.
-- **Decision 4:** Blocked suppliers (e.g. `S004`) holding rate contracts are disqualified under Policy 4.1/5.7.
-- **Decision 7:** Policy versions bind to the requisition creation date, guaranteeing retroactive reproducibility.
-- **Decision 14:** Hard safety guards drop unviable preferred suppliers to the next active candidate or fall through to competitive sourcing, guaranteeing no PO is ever issued to a blocked vendor.
-- **Decision 17:** Signed rate contracts represent legal truth; newly ingested contracts take effect from their start date with `consumed_value = 0.00`.
-- **Decision 18:** Requisition slot-filling requires explicit user confirmation before generating database PR lines.
+Here is how the system came together chronologically across the project:
+
+### 1. Data Profiling & Finding the Real Quirks (Stage 1)
+Before writing code, I inspected all 6 CSV files in `kit/` and wrote `docs/data_profile.md`. 
+I discovered several real-world quirks:
+- Requisition `PR-26-00173/1` asks for delivery to `PUN2` (which doesn't exist; Corvo only has `PUN1` and `CHK1`).
+- Line `PR-26-00172/1` has quantity `0`.
+- 39 lines don't have item codes (37 are colloquial names of master items; 2 are brand-new items).
+- Supplier `S004` (Metalink Alloys) is marked `Blocked` in the supplier master, yet holds an active contract `RC-2026-005`.
+- Supplier `S020` has categories delimited by semicolons (`Electrical Spares;Capital Equipment`) rather than commas.
+
+### 2. Database Schema & Idempotent Ingestion (Stage 2)
+I modeled the database in SQLAlchemy 2 with tables for `plants`, `items`, `suppliers`, `po_history`, `contracts`, `contract_lines`, `policy_versions`, `policy_diffs`, `pr_lines`, `requirements`, `decisions`, `purchase_orders`, `po_lines`, `sourcing_requests`, `audit_log`, and `users`.
+I built `app.seed` to ingest all kit data cleanly and idempotently.
+
+### 3. Declarative Policy Schema & AST Condition Evaluator (Stage 3)
+Management policies change frequently. To avoid code deployments whenever a limit is raised, I designed a versioned JSON policy schema. 
+To evaluate condition trees (`all`, `any`, `not` and leaf comparisons like `eq`, `lt`, `in`), I built a recursive AST evaluator (`condition_evaluator.py`). **I explicitly banned `eval()`** to avoid security holes.
+
+### 4. Core Engine Modules (Stage 4)
+I built out the pure Python engine:
+- **`item_matcher.py`:** Normalizes text, expands industrial acronyms (`brg`, `hyd`, `ss`, `ms`), computes fuzzy token scores, and enforces spec token guards.
+- **`clubber.py`:** Groups demands by `(item_code, plant)` within a 14-day creation window and ±7-day need-by window.
+- **`contracts.py`:** Tracks contract ceilings dynamically via a sequential `ContractLedger`.
+- **`valuation.py`:** Implements the 3-tier valuation hierarchy (Contract rate $\to$ Last 365-day PO price $\to$ Standard price) and emergency bypass logic.
+
+### 5. Multi-Criteria Preferred Supplier Ranking (Stage 5)
+For Policy Section 6, I built `preferred_suppliers.py`:
+- 548-day lookback window for active vendors with transaction history or contracts.
+- Weighted scoring: Frequency (0.30), Recency (0.25), Contract Held (0.20), On-Time % (0.15), Quality Rating (0.10).
+- Deterministic tie-breaking on last PO date, on-time delivery, and supplier ID.
+- Category top-up logic (topping up to 3 for RFQs or 5 for RFPs) using a balanced 50/50 quality and delivery score.
+
+### 6. Batch Orchestrator & PO Consolidation (Stage 6)
+I wired the complete batch pipeline together: match items $\to$ club lines $\to$ select policy version active on the requirement date $\to$ evaluate rules in order $\to$ resolve pricing and suppliers $\to$ enforce the active supplier guard.
+Finally, requirements resulting in a PO are consolidated into sequential POs (`PO-0001`, `PO-0002`) if they share the same supplier, plant, and route, and their first lines were created within 24 hours of each other.
+
+### 7. Verifying Against the 14 Worked Examples (Stage 7)
+I encoded all 14 official worked examples from `Worked_Examples.pdf` into automated pytest tests (`tests/test_worked_examples.py`). 
+Then I processed the entire 186-line sample batch:
+- All 14 worked examples match with 100% precision.
+- 0 blocked suppliers were awarded orders or suggested.
+- Defective rows (`PUN2`, zero quantity) were routed to `NOT_PROCESSED` without crashing the batch.
+
+### 8. Policy Management, Diffing & Rehearsal (Stage 8)
+I created API endpoints for policy ingestion and approval:
+- Extracts amendment text, runs deterministic or LLM schema validation, and generates plain-language executive diffs (e.g. *"Rule 5.4: Spot limit increased from Rs 2,00,000 to Rs 3,00,000 for plant CHK1"*).
+- Generates impact previews by rehearsing how recent PR batches migrate across routes.
+- Wrote `rehearse_amendments.py` testing limit adjustments, plant overrides, and category-level RFQ rules without touching engine code.
+
+### 9. Contract Reconciliation & PDF Ingestion (Stage 9)
+I reconciled `contract_register.csv` against `kit/contracts/pdf/`:
+- Discovered that `RC-2026-031` (Pneumatic Point S021) only existed as a signed PDF entered after the register snapshot date.
+- Established the legal authority rule: signed PDFs represent legal truth and supersede register CSVs.
+- Created PDF extraction with confidence scoring, and ensured newly ingested contracts start with `consumed_value = 0.00` per Policy 4.4.
+
+### 10. Chat Intake & Batch API (Stage 10)
+I implemented `POST /api/chat` with tool definitions (`search_items`, `get_item`, `list_plants`, `create_pr_draft`):
+- Refuses to hallucinate or guess quantities or plant locations.
+- Presents up to 3 candidate chips when a search is ambiguous (e.g. `'bearing'`).
+- Handles `NEW` items with mandatory description, UoM, and estimated price.
+- Added session hydration for page refreshes and built the offline CLI processor (`python -m backend.app.cli process <in.csv> <out.csv>`).
+
+### 11. React UI & Playwright Testing (Stage 11)
+I built the React + Tailwind frontend:
+- Requester Chat with quick-reply chips and a confirmation card.
+- Batches view for drag-and-drop CSV uploads.
+- Buyer Workspace with filters, expandable PR line sub-tables, "Why" rationale drawer, and bulk approve / override modals.
+- Preferred Suppliers explorer with CSV export.
+- Policy Management with version timelines, diffing, and raw JSON inspection.
+- Contracts register with ceiling progress bars and PDF upload extraction preview.
+- Audit Log tracking every state change.
+- Wrote 3 Playwright end-to-end smoke tests covering the core user flows.
+
+---
+
+## Technical Assumptions & Edge Cases
+All 18 specific edge cases, data quirks, and policy ambiguities encountered during development are documented in detail in **`DECISIONS.md`**.
