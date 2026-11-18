@@ -34,7 +34,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from backend.app.database import get_db, engine, Base
+from backend.app.database import get_db, engine, Base, SessionLocal
 from backend.app.models import (
     PolicyVersion,
     PolicyDiff,
@@ -88,6 +88,25 @@ app = FastAPI(
 @app.on_event("startup")
 def on_startup():
     Base.metadata.create_all(bind=engine)
+    # Automatically seed master data if DB is empty
+    from backend.app.models import Item
+    from backend.app.seed import run_seed
+    db = SessionLocal()
+    try:
+        if db.query(Item).count() == 0:
+            run_seed()
+    finally:
+        db.close()
+
+
+@app.get("/health")
+def healthcheck():
+    """Health check endpoint to handle cloud host cold starts (Render/Railway)."""
+    return {
+        "status": "healthy",
+        "service": "Corvo Procurement API",
+        "timestamp": datetime.now().isoformat(),
+    }
 
 # Enable CORS for frontend Vite development server
 app.add_middleware(
@@ -1339,7 +1358,23 @@ def list_audit_logs_endpoint(
 # Mount frontend static build if dist exists (for Docker & Production)
 frontend_dist = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "frontend", "dist")
 if os.path.exists(frontend_dist):
-    app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="static")
+    assets_dir = os.path.join(frontend_dist, "assets")
+    if os.path.exists(assets_dir):
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+    from fastapi.responses import FileResponse
+
+    @app.get("/{full_path:path}")
+    async def serve_spa(request: Request, full_path: str):
+        if full_path.startswith("api/") or full_path == "api" or full_path == "health" or full_path == "docs" or full_path == "openapi.json":
+            raise HTTPException(status_code=404, detail="Not Found")
+        file_path = os.path.join(frontend_dist, full_path)
+        if full_path and os.path.isfile(file_path):
+            return FileResponse(file_path)
+        index_file = os.path.join(frontend_dist, "index.html")
+        if os.path.isfile(index_file):
+            return FileResponse(index_file)
+        raise HTTPException(status_code=404, detail="Frontend build index.html not found")
 
 
 

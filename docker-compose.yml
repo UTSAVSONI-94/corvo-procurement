@@ -1,12 +1,45 @@
 version: '3.8'
 
 services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: corvo-postgres
+    environment:
+      POSTGRES_DB: corvo_db
+      POSTGRES_USER: corvo
+      POSTGRES_PASSWORD: corvopass
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U corvo -d corvo_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   app:
     build:
       context: .
       dockerfile: Dockerfile
+    container_name: corvo-procurement-app
     ports:
       - "8000:8000"
     environment:
       - PORT=8000
+      - DATABASE_URL=postgresql://corvo:corvopass@postgres:5432/corvo_db
+      - CORS_ORIGINS=*
+      - LLM_API_KEY=${LLM_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
+
+volumes:
+  postgres_data:

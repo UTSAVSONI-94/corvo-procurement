@@ -512,10 +512,13 @@ class DataLoader:
 
         v5 = self.db.query(PolicyVersion).filter_by(version_label="v5.0").first()
         if not v5:
+            # Check if ANY active policy already exists in DB (e.g. v5.1 approved during runtime)
+            any_active = self.db.query(PolicyVersion).filter_by(status="ACTIVE").first()
+            status_for_v5 = "SUPERSEDED" if any_active else "ACTIVE"
             v5 = PolicyVersion(
                 version_label="v5.0",
                 effective_from=eff_date,
-                status="ACTIVE",
+                status=status_for_v5,
                 rules_json=policy_json_str,
                 source_text="Corvo Engineering Procurement Policy v5.0",
                 created_by="Head of Procurement",
@@ -524,10 +527,7 @@ class DataLoader:
                 approved_at=datetime.now(),
             )
             self.db.add(v5)
-        else:
-            v5.effective_from = eff_date
-            v5.status = "ACTIVE"
-            v5.rules_json = policy_json_str
+        # If v5.0 already exists, do NOT alter its status or wipe active amendment policies!
 
         self.db.commit()
 

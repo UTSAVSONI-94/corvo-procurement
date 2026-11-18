@@ -14,31 +14,25 @@ So my core architectural boundary is simple:
 
 ---
 
-## What I Used & Why
+## Tools Used: AI vs. Deterministic Architecture
 
-I chose tools for reliability, standard compliance, and developer ergonomics:
+I was deliberate about where AI helps and where it must stay completely out of the execution path:
 
-1. **Python 3.14 & Standard Library:**
-   - Kept currency handling in Python's `Decimal` module everywhere (valuation, line values, contract ceilings, and unit rates) to prevent floating-point rounding errors.
-   - Used standard `dataclasses` for all internal engine objects.
-
-2. **Pydantic v2:**
-   - Used solely to validate policy JSON schemas and enforce parameter boundaries (windows, limits, rule orders).
-
-3. **RapidFuzz:**
-   - Used for token-set fuzzy matching when requesters provide informal slang (`"brg 6308 ZZ for maintenance"`). But I paired this with a strict alphanumeric spec guard so that bearing `6205` can never match bearing `6305`, regardless of fuzzy score.
-
-4. **SQLAlchemy 2.0 & SQLite:**
-   - Built declarative models with strict foreign keys, unique constraints, and indexes. Kept an idempotent `python -m app.seed` command that re-runs cleanly without duplicating data.
-
-5. **pypdf & pdfplumber:**
-   - Multi-strategy text extraction for signed PDF rate contracts and policy memos, extracting Schedule A tables and metadata with confidence scoring.
-
-6. **React 18, Vite & Tailwind CSS:**
-   - Fast, minimal frontend with custom role switching (`Requester`, `Buyer`, `Procurement Admin`), live active policy badge, expandable requirement drawers, and visual contract ceiling bars.
-
-7. **Playwright:**
-   - End-to-end browser automation testing real user flows (Chat to PR, Batch upload to PO approval, Policy amendment ingestion to activation).
+| Functional Area | Technology / Tool Used | Deterministic vs. AI | Why This Boundary |
+|---|---|---|---|
+| **Development & Scaffolding** | Google Antigravity Agent | AI-Assisted | Accelerated initial boilerplate, test case authoring for the 14 worked examples, and UI component drafting. |
+| **Requisition Chat Intake** | Gemini / Claude API via Function Calling (`search_items`, `list_plants`, etc.) + Slot-filling regex fallback | AI with Strict Tools + Offline Deterministic Fallback | Converts conversational phrases ("need 200 gloves for Chakan next Friday") into structured drafts without ever hallucinating item codes or guessing quantities. |
+| **Policy Amendment Reading** | Gemini / Claude API (Prompted RFC 6902 JSON Patch extraction) + Table regex parser | AI Extraction + Deterministic Fallback | Ingests PDF/text memos, extracts structural rule modifications with confidence scoring, and falls back to a deterministic table parser if offline. |
+| **PDF Contract Ingestion** | `pypdf` / `pdfplumber` + LLM extraction | AI Extraction + Human Confirmation | Scans legal contract PDFs into draft rates and ceilings; buyer must confirm before saving to DB. |
+| **Item Resolution & Spec Guard** | `RapidFuzz` + Industrial Token Expander + Alphanumeric Spec Guards | **100% Deterministic Python** | Fast, reproducible token matching. Strict numeric guards guarantee `6205` never matches `6305`. |
+| **Line Clubbing & Demand Grouping** | Pure Python (`backend/engine/clubber.py`) | **100% Deterministic Python** | 14-day creation and ±7-day need-by grouping by `(item, plant)`. |
+| **Contract Ceiling Tracking** | Sequential `ContractLedger` (`backend/engine/contracts.py`) | **100% Deterministic Python** | Strictly chronological spend deduction; zero floating-point errors via `Decimal`. |
+| **Valuation & Pricing Hierarchy** | 3-tier precedence logic (`backend/engine/valuation.py`) | **100% Deterministic Python** | Rate contract $\to$ 365-day PO history $\to$ Standard price. |
+| **Policy Rule Engine (Rules 5.1–5.6)** | Recursive AST condition evaluator (`backend/engine/condition_evaluator.py`) | **100% Deterministic Python** | Evaluates policy rules without `eval()`; completely reproducible across replays. |
+| **Supplier Scoring & Top-Up** | Multi-factor linear formula (`backend/engine/preferred_suppliers.py`) | **100% Deterministic Python** | Exact arithmetic (30% freq, 25% recency, 20% contract, 15% OTD, 10% quality); zero black-box scoring. |
+| **PO Consolidation** | 24-hour grouping window (`backend/engine/orchestrator.py`) | **100% Deterministic Python** | Consolidated PO creation for matching `(supplier, plant, route)`. |
+| **Database & API** | SQLite / PostgreSQL (SQLAlchemy 2.0) + FastAPI | Deterministic Backend | Auditable state persistence, transactional safety, and REST endpoints. |
+| **Frontend UI** | React 18 + Vite + Tailwind CSS | Deterministic UI | Clean buyer/requester workflows with primary actions and Playwright e2e verification. |
 
 ---
 
