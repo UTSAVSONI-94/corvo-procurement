@@ -30,6 +30,7 @@ from fastapi import (
     Query,
 )
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -1333,5 +1334,12 @@ def list_audit_logs_endpoint(
         }
         for l in logs
     ]
+
+
+# Mount frontend static build if dist exists (for Docker & Production)
+frontend_dist = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "frontend", "dist")
+if os.path.exists(frontend_dist):
+    app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="static")
+
 
 

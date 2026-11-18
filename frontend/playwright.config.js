@@ -22,13 +22,13 @@ export default defineConfig({
     {
       command: 'cd .. && ./venv/bin/python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000',
       url: 'http://127.0.0.1:8000/api/policies',
-      reuseExistingServer: false,
+      reuseExistingServer: true,
       timeout: 30000,
     },
     {
       command: './node_modules/.bin/vite --host 127.0.0.1 --port 5173',
       url: 'http://127.0.0.1:5173',
-      reuseExistingServer: false,
+      reuseExistingServer: true,
       timeout: 30000,
     },
   ],
