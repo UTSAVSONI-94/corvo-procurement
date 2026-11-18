@@ -13,15 +13,25 @@ from decimal import Decimal
 import io
 import json
 import csv
+import os
 from typing import Optional, List, Dict, Any
 
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Body, Request, status
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Body, Request, status, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.app.database import get_db, engine, Base
-from backend.app.models import PolicyVersion, PolicyDiff, AuditLog, PRLine
+from backend.app.models import (
+    PolicyVersion,
+    PolicyDiff,
+    AuditLog,
+    PRLine,
+    Contract,
+    ContractLine,
+    Supplier,
+    Item,
+)
 from backend.app.policy_repo import PolicyRepository
 from backend.app.policy_service import (
     extract_text_from_upload,
@@ -30,6 +40,13 @@ from backend.app.policy_service import (
     compute_impact_preview,
     load_reference_data_from_db,
     load_pr_lines_from_db,
+)
+from backend.app.contract_service import (
+    extract_text_from_pdf,
+    parse_contract_text,
+    save_or_update_contract,
+    ContractConfirmRequest,
+    ContractPreviewResponse,
 )
 from backend.engine.schema import PolicyDocument
 from backend.engine.types import PRLineInput, ReferenceData
@@ -399,3 +416,255 @@ async def process_batch_endpoint(
             for r in results
         ],
     }
+
+
+# -------------------------------------------------------------
+# Stage 9: Contract Management Endpoints
+# -------------------------------------------------------------
+@app.get("/api/contracts")
+def list_contracts_endpoint(
+    supplier_id: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),  # ACTIVE, EXPIRED, EXHAUSTED, ALL
+    source: Optional[str] = Query(None),  # REGISTER, PDF_EXTRACTED, PDF_MANUAL, ALL
+    as_of_date: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """
+    List all contracts with filters, ceiling utilization percentage, and validity status.
+    """
+    query_date = date.today()
+    if as_of_date:
+        try:
+            query_date = datetime.strptime(as_of_date, "%Y-%m-%d").date()
+        except ValueError:
+            pass
+
+    query = db.query(Contract)
+
+    if supplier_id:
+        query = query.filter(Contract.supplier_id == supplier_id)
+
+    if source and source.upper() != "ALL":
+        query = query.filter(Contract.source == source.upper())
+
+    contracts = query.all()
+    results = []
+
+    for c in contracts:
+        val_ceil = float(c.value_ceiling)
+        consumed = float(c.consumed_value)
+        rem = max(0.0, val_ceil - consumed)
+        used_pct = round((consumed / val_ceil * 100), 2) if val_ceil > 0 else 0.0
+
+        is_valid_date = c.start_date <= query_date <= c.end_date
+
+        if query_date < c.start_date:
+            validity_status = "FUTURE"
+        elif query_date > c.end_date:
+            validity_status = "EXPIRED"
+        elif rem <= 0.0:
+            validity_status = "EXHAUSTED"
+        else:
+            validity_status = "ACTIVE"
+
+        if status and status.upper() != "ALL":
+            if status.upper() == "ACTIVE" and validity_status != "ACTIVE":
+                continue
+            elif status.upper() == "EXPIRED" and validity_status != "EXPIRED":
+                continue
+            elif status.upper() == "EXHAUSTED" and validity_status != "EXHAUSTED":
+                continue
+
+        # Search filter across contract_id, supplier_name, item_code, description
+        if search:
+            s_low = search.lower()
+            match_id = s_low in c.contract_id.lower()
+            match_sup = s_low in c.supplier_name.lower() or s_low in c.supplier_id.lower()
+            match_item = any(
+                s_low in line.item_code.lower() or s_low in line.description.lower()
+                for line in c.lines
+            )
+            if not (match_id or match_sup or match_item):
+                continue
+
+        results.append({
+            "contract_id": c.contract_id,
+            "supplier_id": c.supplier_id,
+            "supplier_name": c.supplier_name,
+            "start_date": c.start_date.isoformat(),
+            "end_date": c.end_date.isoformat(),
+            "value_ceiling": val_ceil,
+            "consumed_value": consumed,
+            "remaining_value": rem,
+            "ceiling_used_pct": used_pct,
+            "is_valid": is_valid_date,
+            "validity_status": validity_status,
+            "source": c.source,
+            "pdf_path": c.pdf_path,
+            "lines_count": len(c.lines),
+            "lines": [
+                {
+                    "item_code": l.item_code,
+                    "description": l.description,
+                    "uom": l.uom,
+                    "rate": float(l.rate),
+                }
+                for l in c.lines
+            ],
+        })
+
+    return results
+
+
+@app.get("/api/contracts/{contract_id}")
+def get_contract_detail_endpoint(
+    contract_id: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Returns complete details and Schedule A lines for a single contract.
+    """
+    contract = db.query(Contract).filter_by(contract_id=contract_id).first()
+    if not contract:
+        raise HTTPException(status_code=404, detail=f"Contract '{contract_id}' not found")
+
+    val_ceil = float(contract.value_ceiling)
+    consumed = float(contract.consumed_value)
+    rem = max(0.0, val_ceil - consumed)
+    used_pct = round((consumed / val_ceil * 100), 2) if val_ceil > 0 else 0.0
+
+    today = date.today()
+    is_valid_date = contract.start_date <= today <= contract.end_date
+
+    return {
+        "contract_id": contract.contract_id,
+        "supplier_id": contract.supplier_id,
+        "supplier_name": contract.supplier_name,
+        "start_date": contract.start_date.isoformat(),
+        "end_date": contract.end_date.isoformat(),
+        "value_ceiling": val_ceil,
+        "consumed_value": consumed,
+        "remaining_value": rem,
+        "ceiling_used_pct": used_pct,
+        "is_valid": is_valid_date,
+        "source": contract.source,
+        "pdf_path": contract.pdf_path,
+        "lines_count": len(contract.lines),
+        "lines": [
+            {
+                "item_code": l.item_code,
+                "description": l.description,
+                "uom": l.uom,
+                "rate": float(l.rate),
+            }
+            for l in contract.lines
+        ],
+    }
+
+
+@app.post("/api/contracts/extract")
+async def extract_contract_endpoint(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """
+    Extracts structured contract metadata and Schedule A items from a PDF.
+    Supports file upload (multipart/form-data) or JSON payload with file_path/base64.
+    Returns preview data with confidence score, confidence note, and editable fields.
+    """
+    pdf_bytes: Optional[bytes] = None
+    file_path: Optional[str] = None
+    content_type = request.headers.get("content-type", "")
+
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        file_obj = form.get("file")
+        if file_obj and hasattr(file_obj, "read"):
+            pdf_bytes = await file_obj.read()
+            filename = getattr(file_obj, "filename", "contract.pdf")
+            file_path = f"kit/contracts/pdf/{filename}"
+    else:
+        try:
+            body = await request.json()
+            if "file_path" in body:
+                file_path = body["file_path"]
+                if os.path.exists(file_path):
+                    with open(file_path, "rb") as f:
+                        pdf_bytes = f.read()
+                else:
+                    raise HTTPException(
+                        status_code=404, detail=f"File not found on server: {file_path}"
+                    )
+            elif "content_base64" in body:
+                import base64
+
+                pdf_bytes = base64.b64decode(body["content_base64"])
+                file_path = body.get("filename", "uploaded_contract.pdf")
+        except Exception as e:
+            if isinstance(e, HTTPException):
+                raise e
+            raise HTTPException(
+                status_code=400, detail=f"Invalid request body or PDF payload: {str(e)}"
+            )
+
+    if not pdf_bytes:
+        raise HTTPException(
+            status_code=400, detail="No PDF file provided for extraction"
+        )
+
+    try:
+        text = extract_text_from_pdf(pdf_bytes)
+    except Exception as e:
+        raise HTTPException(
+            status_code=422, detail=f"PDF extraction error: {str(e)}"
+        )
+
+    preview = parse_contract_text(text, db, pdf_path=file_path)
+    return preview.model_dump()
+
+
+@app.post("/api/contracts/confirm")
+def confirm_contract_endpoint(
+    req: ContractConfirmRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Buyer confirmation endpoint to save an extracted or edited contract.
+    Persists contract header, line items, and audit log.
+    Sets consumed_value=0.00 per Policy 4.4 for new contracts.
+    """
+    try:
+        saved = save_or_update_contract(req, db)
+        return {
+            "status": "SAVED",
+            "contract_id": saved.contract_id,
+            "supplier_id": saved.supplier_id,
+            "supplier_name": saved.supplier_name,
+            "start_date": saved.start_date.isoformat(),
+            "end_date": saved.end_date.isoformat(),
+            "value_ceiling": float(saved.value_ceiling),
+            "consumed_value": float(saved.consumed_value),
+            "source": saved.source,
+            "lines_count": len(saved.lines),
+            "message": f"Contract {saved.contract_id} successfully saved into active register.",
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=400, detail=f"Failed to save contract: {str(e)}"
+        )
+
+
+@app.post("/api/contracts/manual")
+def manual_contract_endpoint(
+    req: ContractConfirmRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Manual entry endpoint to create contracts directly without a PDF.
+    Sets source='PDF_MANUAL' and saves lines into the database.
+    """
+    req.source = "PDF_MANUAL"
+    return confirm_contract_endpoint(req, db)
+

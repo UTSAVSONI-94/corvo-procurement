@@ -531,6 +531,56 @@ class DataLoader:
 
         self.db.commit()
 
+    def load_pdf_only_contracts(self) -> int:
+        pdf_dir = os.path.join(self.base_dir, "contracts", "pdf")
+        if not os.path.exists(pdf_dir):
+            return 0
+        from backend.app.contract_service import (
+            extract_text_from_pdf,
+            parse_contract_text,
+            save_or_update_contract,
+            ContractConfirmRequest,
+        )
+
+        existing = {c.contract_id for c in self.db.query(Contract.contract_id).all()}
+        count = 0
+        for fname in sorted(os.listdir(pdf_dir)):
+            if not fname.endswith(".pdf"):
+                continue
+            pdf_path = os.path.join(pdf_dir, fname)
+            cid = fname.replace(".pdf", "")
+            # Ingest PDF contracts that are not present in register (e.g. RC-2026-031)
+            if cid not in existing:
+                try:
+                    text = extract_text_from_pdf(pdf_path)
+                    preview = parse_contract_text(text, self.db, pdf_path=pdf_path)
+                    req = ContractConfirmRequest(
+                        contract_id=preview.contract_id,
+                        supplier_id=preview.supplier_id,
+                        supplier_name=preview.supplier_name,
+                        start_date=preview.start_date,
+                        end_date=preview.end_date,
+                        value_ceiling=preview.value_ceiling,
+                        consumed_value=Decimal("0.00"),
+                        source="PDF_EXTRACTED",
+                        pdf_path=pdf_path,
+                        lines=preview.lines,
+                        confirmed_by="System Ingestion",
+                    )
+                    save_or_update_contract(req, self.db)
+                    count += 1
+                except Exception as e:
+                    self.log_issue(
+                        fname,
+                        cid,
+                        "PDF_EXTRACTION_FAILURE",
+                        str(e),
+                        {"filename": fname},
+                        "WARNING",
+                    )
+        self.summary["pdf_contracts_ingested"] = count
+        return count
+
     def run_all(self):
         print("Starting idempotent data ingestion...")
         self.load_plants()
@@ -539,6 +589,7 @@ class DataLoader:
         self.load_po_history()
         self.load_contracts()
         self.load_contract_lines()
+        self.load_pdf_only_contracts()
         self.load_pr_batch()
         self.seed_initial_policy_and_users()
 

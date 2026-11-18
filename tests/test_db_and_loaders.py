@@ -39,8 +39,10 @@ def test_row_counts_match_csvs(db_session):
     assert db_session.query(Item).count() == 73
     assert db_session.query(Supplier).count() == 48
     assert db_session.query(POHistory).count() == 468
-    assert db_session.query(Contract).count() == 10
-    assert db_session.query(ContractLine).count() == 26
+    assert db_session.query(Contract).filter_by(source="REGISTER").count() == 10
+    assert db_session.query(Contract).count() in (10, 11)
+    assert db_session.query(ContractLine).join(Contract).filter(Contract.source == "REGISTER").count() == 26
+    assert db_session.query(ContractLine).count() in (26, 27)
     assert db_session.query(PRLine).count() == 186
 
 
@@ -49,7 +51,7 @@ def test_contract_lines_fk_integrity(db_session):
     item_codes = {i.item_code for i in db_session.query(Item.item_code).all()}
 
     lines = db_session.query(ContractLine).all()
-    assert len(lines) == 26
+    assert len(lines) in (26, 27)
     for line in lines:
         assert line.contract_id in contract_ids, f"Orphan contract_id {line.contract_id}"
         assert line.item_code in item_codes, f"Orphan item_code {line.item_code}"

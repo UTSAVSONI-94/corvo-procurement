@@ -442,27 +442,12 @@ def load_reference_data_from_db(db: Session) -> ReferenceData:
             ContractRecord(
                 contract_id=c.contract_id,
                 supplier_id=c.supplier_id,
-                supplier_name=c.supplier.name if c.supplier else "",
+                supplier_name=c.supplier.name if c.supplier else c.supplier_name,
                 start_date=c.start_date,
                 end_date=c.end_date,
                 value_ceiling=Decimal(str(c.value_ceiling)) if c.value_ceiling is not None else Decimal("0"),
                 consumed_value=Decimal(str(c.consumed_value)) if c.consumed_value is not None else Decimal("0"),
                 lines=lines,
-            )
-        )
-
-    # Check for PDF contract RC-2026-031 if not already present
-    if not any(c.contract_id == "RC-2026-031" for c in contracts):
-        contracts.append(
-            ContractRecord(
-                contract_id="RC-2026-031",
-                supplier_id="S021",
-                supplier_name="Pneumatic Point",
-                start_date=date(2026, 11, 15),
-                end_date=date(2027, 11, 14),
-                value_ceiling=Decimal("500000.00"),
-                consumed_value=Decimal("0.00"),
-                lines={"ITM-1037": ContractLineRecord("RC-2026-031", "ITM-1037", Decimal("2439.00"), "NOS")},
             )
         )
 

@@ -191,3 +191,19 @@ This document tracks edge cases, policy ambiguities, and data inconsistencies di
   4. Added FastAPI endpoints in `backend/app/main.py`: `POST /api/policies/ingest`, `POST /api/policies/{id}/approve`, `GET /api/policies`, `GET /api/policies/{id}`, and `POST /api/process-batch`.
   5. Implemented `backend/scripts/rehearse_amendments.py` conducting end-to-end rehearsal across three successive synthetic amendments (global limit change, plant override, category rule) and verified batch reprocessing.
 - **Why:** Guarantees full audit compliance, eliminates manual code changes when procurement governance rules evolve, and satisfies all Stage 8 grading criteria (15% weight) with comprehensive unit tests and automated rehearsal scripts.
+
+### Decision 17: Contract Reconciliation, PDF Extraction & Register Conflict Resolution (Stage 9)
+- **What I noticed:**
+  1. Contracts exist in multiple forms: tabular records in `contract_register.csv` and signed rate contract PDF files in `kit/contracts/pdf/`.
+  2. Reconciliation analysis revealed:
+     - 8 contracts appear in both the register and the PDF directory (`RC-2025-011`, `RC-2025-014`, `RC-2025-020`, `RC-2026-002`, `RC-2026-005`, `RC-2026-007`, `RC-2026-009`, `RC-2026-012`). All rates, validity terms, value ceilings, and supplier IDs match with 100% data integrity.
+     - 2 contracts (`RC-2026-013` with Precision Fasteners and `RC-2026-015` with Unbrako) are present only in the register CSV with no physical PDF in `kit/contracts/pdf/`.
+     - 1 contract (`RC-2026-031` with Pneumatic Point S021, valid from `2026-11-15` covering `ITM-1037` at ₹2,439.00 with ceiling ₹10,00,000.00) exists exclusively as a signed PDF, representing a contract entered after the register snapshot date (31-Oct-2026).
+  3. **Discrepancy Resolution Rule:** In any procurement audit or legal challenge, a signed rate contract document executed between the parties is the authoritative legal instrument. Therefore, for terms, items, unit rates, and value ceilings, **the signed PDF wins over the CSV register**. Conversely, cumulative runtime consumption (`consumed_value`) is an operational ledger property tracked in the database/ERP (physical contracts cannot record future spend), so `consumed_value` is retained from the register. Per Policy 4.4, any newly discovered PDF contract starts with `consumed_value = 0.00`.
+- **What I decided:**
+  1. Built `backend/app/contract_service.py` providing multi-strategy PDF text extraction (`pypdf` with fallback regex scanning), automated cross-referencing against supplier and item masters, and confidence scoring.
+  2. Implemented `GET /api/contracts` (with filters for supplier, status, source, as_of_date, and full-text search, reporting ceiling utilization % and remaining balances) and `GET /api/contracts/{id}`.
+  3. Implemented `POST /api/contracts/extract` generating structured previews with editable fields, `POST /api/contracts/confirm` enforcing `consumed_value=0.00` and writing audit logs, and `POST /api/contracts/manual` for direct buyer entry.
+  4. Added `load_pdf_only_contracts()` to the database seeder and created `backend/scripts/ingest_pdf_contracts.py` to reconcile and ingest PDF-only contracts automatically.
+  5. Refactored `tests/test_worked_examples.py` to source `RC-2026-031` directly from the database table rather than a test fixture, confirming that Worked Example 2 (`PR-26-00045/1` awarded `CONTRACT_PO` to S021 at ₹2,439.00) passes against real ingested database data.
+- **Why:** Complies fully with Policy 4.4, provides a transparent audit trail for late-signed contracts, eliminates mock fixtures from tests, and ensures total consistency across physical contract documents and ERP registries.

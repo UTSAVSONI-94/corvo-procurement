@@ -28,100 +28,15 @@ from backend.engine.schema import PolicyDocument
 
 @pytest.fixture(scope="module")
 def reference_data():
-    """Loads all real CSV files from kit/master_data and kit/contracts."""
-    items = {}
-    with open("kit/master_data/item_master.csv", "r", encoding="utf-8") as f:
-        for r in csv.DictReader(f):
-            items[r["item_code"]] = ItemMasterRecord(
-                item_code=r["item_code"],
-                description=r["description"],
-                uom=r["uom"],
-                category=r["category"],
-                item_type=r["item_type"],
-                standard_price=Decimal(r["standard_price"]),
-            )
+    """Loads real reference data directly from the seeded database (including PDF-ingested RC-2026-031)."""
+    from backend.app.database import SessionLocal
+    from backend.app.policy_service import load_reference_data_from_db
 
-    suppliers = {}
-    with open("kit/master_data/supplier_master.csv", "r", encoding="utf-8") as f:
-        for r in csv.DictReader(f):
-            suppliers[r["supplier_id"]] = SupplierRecord(
-                supplier_id=r["supplier_id"],
-                name=r["name"],
-                city=r["city"],
-                categories=r["categories"],
-                status=r["status"],
-                on_time_pct=Decimal(r["on_time_pct"]) if r["on_time_pct"] else Decimal("0"),
-                quality_rating=Decimal(r["quality_rating"]) if r["quality_rating"] else Decimal("0"),
-            )
-
-    po_history = []
-    with open("kit/master_data/po_history.csv", "r", encoding="utf-8") as f:
-        for r in csv.DictReader(f):
-            po_history.append(
-                POHistoryRecord(
-                    po_number=r["po_number"],
-                    po_date=datetime.strptime(r["po_date"], "%Y-%m-%d").date(),
-                    supplier_id=r["supplier_id"],
-                    item_code=r["item_code"],
-                    quantity=Decimal(r["quantity"]),
-                    uom=r.get("uom", ""),
-                    unit_price=Decimal(r["unit_price"]),
-                    plant=r["plant"],
-                )
-            )
-
-    contract_lines_map = {}
-    with open("kit/contracts/contract_lines.csv", "r", encoding="utf-8") as f:
-        for r in csv.DictReader(f):
-            c_id = r["contract_id"]
-            line = ContractLineRecord(
-                contract_id=c_id,
-                item_code=r["item_code"],
-                rate=Decimal(r["rate"]),
-                uom=r.get("uom", ""),
-                description=r.get("description", ""),
-            )
-            contract_lines_map.setdefault(c_id, {})[r["item_code"]] = line
-
-    contracts = []
-    with open("kit/contracts/contract_register.csv", "r", encoding="utf-8") as f:
-        for r in csv.DictReader(f):
-            c_id = r["contract_id"]
-            supp_name = suppliers[r["supplier_id"]].name if r["supplier_id"] in suppliers else ""
-            cap_val = r.get("value_cap") or r.get("value_ceiling") or "0"
-            contracts.append(
-                ContractRecord(
-                    contract_id=c_id,
-                    supplier_id=r["supplier_id"],
-                    supplier_name=supp_name,
-                    start_date=datetime.strptime(r["start_date"], "%Y-%m-%d").date(),
-                    end_date=datetime.strptime(r["end_date"], "%Y-%m-%d").date(),
-                    value_ceiling=Decimal(cap_val),
-                    consumed_value=Decimal(r.get("consumed_value", "0.00")),
-                    lines=contract_lines_map.get(c_id, {}),
-                )
-            )
-
-    # Contract RC-2026-031 exists as a signed PDF valid from 2026-11-15 (Worked Example 2)
-    contracts.append(
-        ContractRecord(
-            contract_id="RC-2026-031",
-            supplier_id="S021",
-            supplier_name="Pneumatic Point",
-            start_date=date(2026, 11, 15),
-            end_date=date(2027, 11, 14),
-            value_ceiling=Decimal("500000.00"),
-            consumed_value=Decimal("0.00"),
-            lines={"ITM-1037": ContractLineRecord("RC-2026-031", "ITM-1037", Decimal("2439.00"), "NOS")},
-        )
-    )
-
-    return ReferenceData(
-        items=items,
-        suppliers=suppliers,
-        contracts=contracts,
-        po_history=po_history,
-    )
+    db = SessionLocal()
+    try:
+        return load_reference_data_from_db(db)
+    finally:
+        db.close()
 
 
 @pytest.fixture(scope="module")
