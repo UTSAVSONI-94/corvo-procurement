@@ -315,3 +315,51 @@ class DataQualityIssue(Base):
 
     def __repr__(self):
         return f"<DataQualityIssue {self.issue_type} in {self.file_source}: {self.row_identifier}>"
+
+
+class ChatSession(Base):
+    __tablename__ = "chat_sessions"
+
+    id = Column(String(50), primary_key=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+    updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
+    status = Column(String(20), nullable=False, default="ACTIVE")  # ACTIVE, COMPLETED, ABANDONED
+
+    messages = relationship("ChatMessage", back_populates="session", cascade="all, delete-orphan", order_by="ChatMessage.id")
+    draft = relationship("PRDraft", back_populates="session", uselist=False, cascade="all, delete-orphan")
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(String(50), ForeignKey("chat_sessions.id"), nullable=False)
+    role = Column(String(20), nullable=False)  # user, assistant, system, tool
+    content = Column(Text, nullable=False)
+    tool_calls_json = Column(Text, nullable=True)
+    tool_call_id = Column(String(60), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+
+    session = relationship("ChatSession", back_populates="messages")
+
+
+class PRDraft(Base):
+    __tablename__ = "pr_drafts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(String(50), ForeignKey("chat_sessions.id"), nullable=False, unique=True)
+    item_code = Column(String(20), nullable=True)
+    description = Column(String(255), nullable=True)
+    quantity = Column(Numeric(12, 2), nullable=True)
+    uom = Column(String(20), nullable=True)
+    plant = Column(String(10), nullable=True)  # PUN1, CHK1
+    need_by_date = Column(Date, nullable=True)
+    urgency = Column(String(20), nullable=False, default="Normal")  # Normal, Emergency
+    estimated_unit_price = Column(Numeric(14, 2), nullable=True)
+    status = Column(String(20), nullable=False, default="DRAFT")  # DRAFT, CONFIRMED, CANCELLED
+    created_pr_no = Column(String(30), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+    updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
+
+    session = relationship("ChatSession", back_populates="draft")
+

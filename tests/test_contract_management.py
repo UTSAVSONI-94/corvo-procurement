@@ -242,3 +242,4 @@ def test_policy_4_4_late_signed_contract_binding(client):
         assert c31.lines[0].rate == Decimal("2439.00")
     finally:
         db.close()
+

@@ -160,3 +160,4 @@ def run_contract_ingestion():
 
 if __name__ == "__main__":
     run_contract_ingestion()
+

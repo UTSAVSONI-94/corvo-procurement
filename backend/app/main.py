@@ -16,7 +16,19 @@ import csv
 import os
 from typing import Optional, List, Dict, Any
 
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Body, Request, status, Query
+from fastapi import (
+    FastAPI,
+    Depends,
+    HTTPException,
+    UploadFile,
+    File,
+    Form,
+    Body,
+    Request,
+    Response,
+    status,
+    Query,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -31,6 +43,10 @@ from backend.app.models import (
     ContractLine,
     Supplier,
     Item,
+    Plant,
+    ChatSession,
+    ChatMessage,
+    PRDraft,
 )
 from backend.app.policy_repo import PolicyRepository
 from backend.app.policy_service import (
@@ -48,6 +64,8 @@ from backend.app.contract_service import (
     ContractConfirmRequest,
     ContractPreviewResponse,
 )
+from backend.app.chat_service import process_chat_message
+from backend.engine.preferred_suppliers import build_preferred_supplier_list
 from backend.engine.schema import PolicyDocument
 from backend.engine.types import PRLineInput, ReferenceData
 from backend.engine.orchestrator import process_batch
@@ -667,4 +685,268 @@ def manual_contract_endpoint(
     """
     req.source = "PDF_MANUAL"
     return confirm_contract_endpoint(req, db)
+
+
+# -------------------------------------------------------------
+# Stage 10: Chat Intake & Batch API Endpoints
+# -------------------------------------------------------------
+
+class ChatMessageRequest(BaseModel):
+    session_id: Optional[str] = None
+    message: str
+    ref_date: Optional[str] = None
+
+
+@app.post("/api/chat")
+def chat_intake_endpoint(
+    req: ChatMessageRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Session-based requester assistant.
+    Slot-fills quantity, plant, need-by date, urgency, and matches items.
+    Summarizes and asks for confirmation before generating real PR.
+    """
+    parsed_date = None
+    if req.ref_date:
+        try:
+            parsed_date = datetime.strptime(req.ref_date, "%Y-%m-%d").date()
+        except ValueError:
+            pass
+
+    return process_chat_message(
+        session_id=req.session_id,
+        message=req.message,
+        db=db,
+        ref_date=parsed_date,
+    )
+
+
+@app.get("/api/chat/{session_id}")
+def get_chat_session_endpoint(
+    session_id: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Returns full chat session history and active PR draft state.
+    Allows frontend page refresh to persist conversation state seamlessly.
+    """
+    session = db.query(ChatSession).filter_by(id=session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+
+    messages = [
+        {
+            "role": m.role,
+            "content": m.content,
+            "created_at": m.created_at.isoformat(),
+        }
+        for m in session.messages
+    ]
+
+    draft_info = None
+    if session.draft:
+        d = session.draft
+        draft_info = {
+            "draft_id": d.id,
+            "item_code": d.item_code,
+            "description": d.description,
+            "quantity": float(d.quantity) if d.quantity else None,
+            "uom": d.uom,
+            "plant": d.plant,
+            "need_by_date": d.need_by_date.isoformat() if d.need_by_date else None,
+            "urgency": d.urgency,
+            "estimated_unit_price": float(d.estimated_unit_price) if d.estimated_unit_price else None,
+            "status": d.status,
+            "created_pr_no": d.created_pr_no,
+        }
+
+    return {
+        "session_id": session.id,
+        "status": session.status,
+        "messages": messages,
+        "draft": draft_info,
+    }
+
+
+@app.post("/api/pr/upload")
+async def upload_pr_batch_endpoint(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """
+    Accepts CSV file upload and returns validation summary:
+    Total lines, accepted lines, rejected lines with specific rejection reasons.
+    """
+    content_type = request.headers.get("content-type", "")
+    csv_content = ""
+
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        file_obj = form.get("file")
+        if file_obj and hasattr(file_obj, "read"):
+            bytes_data = await file_obj.read()
+            csv_content = bytes_data.decode("utf-8", errors="replace")
+    else:
+        try:
+            body = await request.json()
+            csv_content = body.get("csv_content", "")
+        except Exception:
+            pass
+
+    if not csv_content:
+        raise HTTPException(status_code=400, detail="No CSV data provided for upload")
+
+    reader = csv.DictReader(io.StringIO(csv_content))
+    accepted = []
+    rejected = []
+
+    existing_plants = {p.plant_code for p in db.query(Plant.plant_code).all()} or {"PUN1", "CHK1"}
+
+    for idx, r in enumerate(reader, start=1):
+        pr_no = r.get("pr_no", f"ROW-{idx}").strip()
+        pr_line = r.get("pr_line", "1").strip()
+        plant = r.get("plant", "").strip().upper()
+        qty_str = r.get("quantity", "0").strip()
+
+        try:
+            qty = Decimal(qty_str)
+        except Exception:
+            qty = Decimal("0")
+
+        reasons = []
+        if plant not in existing_plants:
+            reasons.append(f"Invalid manufacturing plant '{plant}' (must be PUN1 or CHK1)")
+        if qty <= 0:
+            reasons.append(f"Quantity must be greater than zero (found {qty})")
+
+        row_data = {
+            "row_number": idx,
+            "pr_no": pr_no,
+            "pr_line": pr_line,
+            "plant": plant,
+            "item_code": r.get("item_code"),
+            "description": r.get("description"),
+            "quantity": float(qty),
+            "uom": r.get("uom"),
+            "need_by_date": r.get("need_by_date"),
+            "urgency": r.get("urgency", "Normal"),
+        }
+
+        if reasons:
+            row_data["rejection_reasons"] = reasons
+            rejected.append(row_data)
+        else:
+            accepted.append(row_data)
+
+    return {
+        "total_rows": len(accepted) + len(rejected),
+        "accepted_count": len(accepted),
+        "rejected_count": len(rejected),
+        "accepted_rows": accepted,
+        "rejected_rows": rejected,
+        "summary": f"Validated {len(accepted) + len(rejected)} lines: {len(accepted)} accepted, {len(rejected)} rejected.",
+    }
+
+
+@app.get("/api/export/decisions")
+def export_decisions_csv_endpoint(
+    batch_id: Optional[str] = Query(None),
+    as_of: Optional[str] = Query(None),
+    policy_version: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """
+    Exports procurement batch decisions into CSV with the EXACT column order:
+    pr_no, pr_line, resolved_item_code, group_id, po_id, decision, route, supplier_id, unit_price, group_value_inr, suggested_supplier_ids, policy_version, reason
+    """
+    pr_inputs = load_pr_lines_from_db(db)
+    ref_data = load_reference_data_from_db(db)
+    policy_repo = PolicyRepository(db)
+
+    results = process_batch(pr_inputs, ref_data, policy_repo)
+
+    output = io.StringIO()
+    fieldnames = [
+        "pr_no",
+        "pr_line",
+        "resolved_item_code",
+        "group_id",
+        "po_id",
+        "decision",
+        "route",
+        "supplier_id",
+        "unit_price",
+        "group_value_inr",
+        "suggested_supplier_ids",
+        "policy_version",
+        "reason",
+    ]
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+
+    for r in results:
+        sugs = (
+            ";".join(r.suggested_supplier_ids)
+            if isinstance(r.suggested_supplier_ids, list)
+            else (r.suggested_supplier_ids or "")
+        )
+        writer.writerow({
+            "pr_no": r.pr_no,
+            "pr_line": r.pr_line,
+            "resolved_item_code": r.resolved_item_code or "",
+            "group_id": r.group_id or "",
+            "po_id": r.po_id or "",
+            "decision": r.decision,
+            "route": r.route,
+            "supplier_id": r.supplier_id or "",
+            "unit_price": f"{r.unit_price:.2f}" if r.unit_price is not None else "",
+            "group_value_inr": f"{r.group_value_inr:.2f}",
+            "suggested_supplier_ids": sugs,
+            "policy_version": r.policy_version,
+            "reason": r.reason,
+        })
+
+    output.seek(0)
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=procurement_decisions.csv"},
+    )
+
+
+@app.get("/api/export/preferred-suppliers")
+def export_preferred_suppliers_csv_endpoint(
+    as_of: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """
+    Exports top 3 preferred suppliers per item as of the given date into CSV with EXACT columns:
+    item_code, rank, supplier_id, reference_price
+    """
+    as_of_date = datetime.strptime(as_of, "%Y-%m-%d").date() if as_of else date(2026, 11, 1)
+    ref_data = load_reference_data_from_db(db)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["item_code", "rank", "supplier_id", "reference_price"])
+
+    for item_code in sorted(ref_data.items.keys()):
+        ranked = build_preferred_supplier_list(
+            item_code=item_code,
+            as_of_date=as_of_date,
+            po_history=ref_data.po_history,
+            contracts=ref_data.contracts,
+            suppliers=ref_data.suppliers,
+        )
+        for s in ranked[:3]:
+            ref_price_str = f"{s.reference_price:.2f}" if s.reference_price else ""
+            writer.writerow([item_code, s.rank, s.supplier_id, ref_price_str])
+
+    output.seek(0)
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=preferred_suppliers_{as_of_date}.csv"},
+    )
 
