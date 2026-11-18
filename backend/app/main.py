@@ -1363,8 +1363,13 @@ def reset_baseline_endpoint(db: Session = Depends(get_db)):
     - Sets policy v5.0 back to ACTIVE status
     - Refreshes the PolicyRepository in-memory cache
     """
-    db.query(PolicyDiff).filter(PolicyDiff.proposed_version_id > 1).delete()
-    db.query(PolicyVersion).filter(PolicyVersion.id > 1).delete()
+    diffs = db.query(PolicyDiff).filter(PolicyDiff.new_version_id > 1).all()
+    for d in diffs:
+        db.delete(d)
+
+    versions = db.query(PolicyVersion).filter(PolicyVersion.id > 1).all()
+    for v in versions:
+        db.delete(v)
 
     v5 = db.query(PolicyVersion).filter_by(version_label="v5.0").first()
     if v5:
